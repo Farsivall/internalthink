@@ -28,3 +28,22 @@ export async function getProject(idOrSlug: string): Promise<ApiProject> {
   }
   return res.json()
 }
+
+export interface CreateProjectInput {
+  name: string
+  description?: string | null
+}
+
+export async function createProject(input: CreateProjectInput): Promise<ApiProject> {
+  const url = API_BASE ? `${API_BASE}/api/projects` : '/api/projects'
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: input.name, description: input.description ?? null }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? `Failed to create project: ${res.statusText}`)
+  }
+  return res.json()
+}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { getProjects } from '../api/projects'
 import type { ApiProject } from '../api/projects'
 import { mockProjects } from '../data/mock'
@@ -36,8 +37,19 @@ export function Home() {
   const hasProjects = projects.length > 0
   return (
     <div className="animate-fade-in">
-      <h1 className="text-2xl font-semibold text-white mb-2">Projects</h1>
-      <p className="text-white/60 mb-8">Each project contains decisions, documents, and persona simulations.</p>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-semibold text-white mb-2">Projects</h1>
+          <p className="text-white/60">Each project contains decisions, documents, and persona simulations.</p>
+        </div>
+        <Link
+          to="/project/new"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600/80 text-white text-sm font-medium hover:bg-emerald-500/80 border border-emerald-500/40 transition-colors"
+        >
+          <ion-icon name="add-circle" />
+          New project
+        </Link>
+      </div>
       {loading ? (
         <div className="text-white/50 py-8">Loading projects…</div>
       ) : hasProjects ? (

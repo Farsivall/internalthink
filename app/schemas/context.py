@@ -26,6 +26,7 @@ class GitHubContextRequest(BaseModel):
     project_id: UUID
     repo_url: str
     label: Optional[str] = None
+    permitted_specialists: PermittedSpecialists = "all"
 
 class ContextSourceResponse(BaseModel):
     id: UUID

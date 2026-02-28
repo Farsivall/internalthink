@@ -1,9 +1,11 @@
+import uuid
 from fastapi import APIRouter, HTTPException, status
 from uuid import UUID
 from datetime import datetime, timezone
 from typing import List
 from app.schemas.projects import ProjectCreate, ProjectResponse
 from app.db.client import get_supabase
+from app.db.local_store import add_local_project, get_local_project as get_local_project_store, get_all_local_projects
 
 router = APIRouter()
 
@@ -27,7 +29,8 @@ def _is_uuid(s: str) -> bool:
 def get_projects():
     supabase = get_supabase()
     if not supabase:
-        return FALLBACK_PROJECTS
+        local = get_all_local_projects()
+        return FALLBACK_PROJECTS + [ProjectResponse(**p) for p in local]
     try:
         response = supabase.table("projects").select("*").execute()
         return response.data or FALLBACK_PROJECTS
@@ -38,9 +41,12 @@ def get_projects():
 def create_project(project: ProjectCreate):
     supabase = get_supabase()
     if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+        p = add_local_project(project.name, project.description)
+        return ProjectResponse(**p)
     try:
-        response = supabase.table("projects").insert(project.model_dump(exclude_none=True)).execute()
+        slug = "proj-" + uuid.uuid4().hex[:8]
+        data = {**project.model_dump(exclude_none=True), "slug": slug}
+        response = supabase.table("projects").insert(data).execute()
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to create project")
         return response.data[0]
@@ -57,6 +63,10 @@ def get_project(id_or_slug: str):
     for p in FALLBACK_PROJECTS:
         if str(p.id) == id_or_slug or (p.slug and p.slug == id_or_slug):
             return p
+
+    local = get_local_project_store(id_or_slug)
+    if local:
+        return ProjectResponse(**local)
 
     supabase = get_supabase()
     if not supabase:

@@ -8,6 +8,12 @@ from app.schemas.context import (
     ContextSourceCreate, ContextSourceResponse, GitHubContextRequest, DocumentTextRequest,
 )
 from app.db.client import get_supabase
+from app.db.local_store import (
+    resolve_local_project_id,
+    get_local_context,
+    add_local_context,
+    has_local_project,
+)
 from app.services.github import parse_repo_url, fetch_file_tree, select_important_files, fetch_file_contents
 from app.services.summariser import summarise_codebase
 from app.services.documents import extract_text_from_pdf, truncate_to_word_limit
@@ -22,6 +28,9 @@ def _resolve_project_uuid(project_id: str) -> str | None:
         return str(UUID(project_id))
     except ValueError:
         pass
+    local_pid = resolve_local_project_id(project_id)
+    if local_pid:
+        return local_pid
     try:
         supabase = get_supabase()
         if not supabase:
@@ -42,7 +51,7 @@ def get_context_sources(project_id: str = Query(...)):
         return []
     supabase = get_supabase()
     if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+        return get_local_context(pid)
     try:
         response = supabase.table("context_sources").select("*").eq("project_id", pid).order("created_at").execute()
         return response.data
@@ -75,19 +84,24 @@ def create_context_source(source: ContextSourceCreate):
 @router.post("/document", response_model=ContextSourceResponse, status_code=status.HTTP_201_CREATED)
 def create_document_text(request: DocumentTextRequest):
     """Store a plain text document as a context source."""
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+    pid = str(request.project_id)
     content = truncate_to_word_limit(request.content)
     label = request.label or "Document"
+
+    supabase = get_supabase()
+    if not supabase:
+        if not has_local_project(pid):
+            raise HTTPException(status_code=404, detail="Project not found")
+        source = add_local_context(pid, "document", label, content, request.permitted_specialists)
+        return ContextSourceResponse(**source)
+
     data = {
-        "project_id": str(request.project_id),
+        "project_id": pid,
         "type": "document",
         "label": label,
         "content": content,
         "permitted_specialists": json.dumps(request.permitted_specialists),
     }
-
     try:
         response = supabase.table("context_sources").insert(data).execute()
         if not response.data:
@@ -109,9 +123,7 @@ async def upload_document_file(
     permitted_specialists: Optional[str] = Form(None),
 ):
     """Upload a PDF or text file, extract text, and store as a document context source."""
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+    pid = _resolve_project_uuid(project_id) or project_id
     file_bytes = await file.read()
 
     # Detect file type and extract text
@@ -147,7 +159,7 @@ async def upload_document_file(
     text = truncate_to_word_limit(text)
 
     # Parse permitted_specialists from form string
-    specialists_value = "all"
+    specialists_value: object = "all"
     if permitted_specialists:
         try:
             parsed = json.loads(permitted_specialists)
@@ -158,14 +170,20 @@ async def upload_document_file(
         except json.JSONDecodeError:
             specialists_value = "all"
 
+    supabase = get_supabase()
+    if not supabase:
+        if not has_local_project(pid):
+            raise HTTPException(status_code=404, detail="Project not found")
+        source = add_local_context(pid, "document", label or filename or "Uploaded Document", text, specialists_value)
+        return ContextSourceResponse(**source)
+
     data = {
-        "project_id": project_id,
+        "project_id": pid,
         "type": "document",
         "label": label or filename or "Uploaded Document",
         "content": text,
         "permitted_specialists": json.dumps(specialists_value),
     }
-
     try:
         response = supabase.table("context_sources").insert(data).execute()
         if not response.data:
@@ -219,16 +237,22 @@ def create_github_context(request: GitHubContextRequest):
 
     # Step 5: Store as a codebase context source
     label = request.label or f"{owner}/{repo}"
-    data = {
-        "project_id": str(request.project_id),
-        "type": "codebase",
-        "label": label,
-        "content": summary,
-    }
+    pid = str(request.project_id)
 
     supabase = get_supabase()
     if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+        if not has_local_project(pid):
+            raise HTTPException(status_code=404, detail="Project not found")
+        source = add_local_context(pid, "codebase", label, summary, request.permitted_specialists)
+        return ContextSourceResponse(**source)
+
+    data = {
+        "project_id": pid,
+        "type": "codebase",
+        "label": label,
+        "content": summary,
+        "permitted_specialists": json.dumps(request.permitted_specialists),
+    }
     try:
         response = supabase.table("context_sources").insert(data).execute()
         if not response.data:
