@@ -1,13 +1,18 @@
--- Projects Table
-CREATE TABLE projects (
+-- =============================================================================
+-- Schema from new.md Section 2 — Database Schema
+-- Three tables only. Apply via Supabase MCP (apply_migration) or Dashboard.
+-- =============================================================================
+
+-- projects — top-level workspace
+CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Context Sources Table (with type constraint)
-CREATE TABLE context_sources (
+-- context_sources — documents/slack/codebase attached to a project (type enforced at DB level)
+CREATE TABLE IF NOT EXISTS context_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (type IN ('document', 'slack', 'codebase')),
@@ -16,8 +21,8 @@ CREATE TABLE context_sources (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Decisions Table
-CREATE TABLE decisions (
+-- decisions — submitted question and full evaluation result
+CREATE TABLE IF NOT EXISTS decisions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     question TEXT NOT NULL,
@@ -26,6 +31,6 @@ CREATE TABLE decisions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Indexes
-CREATE INDEX idx_context_sources_project_id ON context_sources(project_id);
-CREATE INDEX idx_decisions_project_id ON decisions(project_id);
+-- Indexes on project_id for both context_sources and decisions
+CREATE INDEX IF NOT EXISTS idx_context_sources_project_id ON context_sources(project_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_project_id ON decisions(project_id);
