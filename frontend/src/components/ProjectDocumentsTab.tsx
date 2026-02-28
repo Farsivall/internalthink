@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
+import { getContextSources } from '../api/context'
+import type { ContextSource } from '../api/context'
 import { getProjectDocuments, mockSpecialists } from '../data/mock'
 import type { ProjectDocument } from '../data/mock'
 
@@ -20,22 +22,44 @@ const typeIcons: Record<string, string> = {
   codebase: 'code-slash',
 }
 
+function toProjectDocument(c: ContextSource): ProjectDocument {
+  return {
+    id: c.id,
+    projectId: c.project_id,
+    name: c.label ?? c.type,
+    type: c.type,
+    label: c.label ?? undefined,
+    addedAt: c.created_at,
+    personaIds: ['legal', 'financial', 'technical', 'bd', 'tax'],
+  }
+}
+
 export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
-  const docs = getProjectDocuments(projectId)
-  const [personaByDoc, setPersonaByDoc] = useState<Record<string, Set<string>>>(() => {
-    const initial: Record<string, Set<string>> = {}
-    docs.forEach((d) => {
-      initial[d.id] = new Set(d.personaIds ?? [])
-    })
-    return initial
-  })
+  const [docs, setDocs] = useState<ProjectDocument[]>([])
+  const [loading, setLoading] = useState(true)
+  const [personaByDoc, setPersonaByDoc] = useState<Record<string, Set<string>>>({})
 
   useEffect(() => {
-    const next: Record<string, Set<string>> = {}
-    docs.forEach((d) => {
-      next[d.id] = new Set(d.personaIds ?? [])
-    })
-    setPersonaByDoc(next)
+    getContextSources(projectId)
+      .then((data) => {
+        const mapped = data.map(toProjectDocument)
+        setDocs(mapped)
+        const next: Record<string, Set<string>> = {}
+        mapped.forEach((d) => {
+          next[d.id] = new Set(d.personaIds ?? [])
+        })
+        setPersonaByDoc(next)
+      })
+      .catch(() => {
+        const fallback = getProjectDocuments(projectId)
+        setDocs(fallback)
+        const next: Record<string, Set<string>> = {}
+        fallback.forEach((d) => {
+          next[d.id] = new Set(d.personaIds ?? [])
+        })
+        setPersonaByDoc(next)
+      })
+      .finally(() => setLoading(false))
   }, [projectId])
 
   const togglePersona = useCallback((docId: string, personaId: string) => {
@@ -66,7 +90,9 @@ export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
         </button>
       </div>
 
-      {docs.length === 0 ? (
+      {loading ? (
+        <div className="text-white/50 py-8">Loading documents…</div>
+      ) : docs.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/20 bg-surface-800/30 p-12 text-center">
           <ion-icon name="document-outline" className="text-5xl text-white/30 mb-4" />
           <p className="text-white/60 mb-4">No documents attached yet.</p>

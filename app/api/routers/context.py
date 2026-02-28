@@ -12,13 +12,35 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+def _resolve_project_uuid(project_id: str) -> str | None:
+    """Resolve slug (proj-1) or UUID to project UUID."""
+    try:
+        return str(UUID(project_id))
+    except ValueError:
+        pass
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        r = supabase.table("projects").select("id").eq("slug", project_id).limit(1).execute()
+        if r.data and len(r.data) > 0:
+            return str(r.data[0]["id"])
+        return None
+    except Exception:
+        return None
+
+
 @router.get("/", response_model=List[ContextSourceResponse])
-def get_context_sources(project_id: UUID = Query(...)):
+def get_context_sources(project_id: str = Query(...)):
+    """Get context sources for a project. project_id can be slug (proj-1) or UUID."""
+    pid = _resolve_project_uuid(project_id)
+    if not pid:
+        return []
     supabase = get_supabase()
     if not supabase:
         raise HTTPException(status_code=503, detail="Supabase not configured")
     try:
-        response = supabase.table("context_sources").select("*").eq("project_id", str(project_id)).order("created_at").execute()
+        response = supabase.table("context_sources").select("*").eq("project_id", pid).order("created_at").execute()
         return response.data
     except Exception as e:
         raise HTTPException(

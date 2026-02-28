@@ -1,19 +1,34 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Specialist, ThreadMessage } from '../data/mock'
-import { mockSpecialists, getProjectChat, getProject } from '../data/mock'
+import { mockSpecialists } from '../data/mock'
 import { sendChatMessage } from '../api/chat'
+import { getProjectChat as fetchProjectChat } from '../api/chatMessages'
 
-export function ProjectChatTab({ projectId }: { projectId: string }) {
-  const project = getProject(projectId)
+export function ProjectChatTab({ projectId, projectName, projectDescription }: { projectId: string; projectName?: string; projectDescription?: string }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(['legal', 'financial', 'technical']))
-  const [localMessages, setLocalMessages] = useState<ThreadMessage[]>([])
+  const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [expandedThinkingId, setExpandedThinkingId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const thread = getProjectChat(projectId)
-  const allMessages = [...thread, ...localMessages]
+  useEffect(() => {
+    fetchProjectChat(projectId)
+      .then((msgs) => {
+        setMessages(
+          msgs.map((m) => ({
+            id: m.id,
+            sender: m.sender,
+            text: m.text,
+            at: m.at,
+            thinkingProcess: m.thinkingProcess,
+          }))
+        )
+      })
+      .catch(() => setMessages([]))
+  }, [projectId])
+
+  const allMessages = messages
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -38,7 +53,7 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
       text,
       at: new Date().toISOString(),
     }
-    setLocalMessages((prev) => [...prev, userMsg])
+    setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
     const specialistIds = Array.from(selectedIds)
     try {
@@ -51,7 +66,7 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
         at: now,
         thinkingProcess: r.thinking_process,
       }))
-      setLocalMessages((prev) => [...prev, ...newMessages])
+      setMessages((prev) => [...prev, ...newMessages])
     } catch (err) {
       const fallback: ThreadMessage = {
         id: `local-spec-${Date.now()}`,
@@ -60,7 +75,7 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
         at: new Date().toISOString(),
         thinkingProcess: 'Backend unavailable or API key not configured.',
       }
-      setLocalMessages((prev) => [...prev, fallback])
+      setMessages((prev) => [...prev, fallback])
     } finally {
       setIsLoading(false)
     }
@@ -86,7 +101,7 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
                 <ion-icon name="people" size="small" className="text-white text-xl" />
               </div>
               <div className="min-w-0">
-                <h2 className="font-semibold text-white truncate">{project?.name ?? 'Project chat'}</h2>
+                <h2 className="font-semibold text-white truncate">{projectName ?? 'Project chat'}</h2>
                 <p className="text-xs text-white/50 truncate">
                   {specialistsInChat.length} specialist{specialistsInChat.length !== 1 ? 's' : ''} in chat
                 </p>
@@ -105,10 +120,13 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto bg-surface-900/40 p-4 space-y-2 min-h-0">
           {allMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-white/40 text-sm gap-2">
-              <ion-icon name="chatbubbles-outline" className="text-4xl" />
-              <p>No messages yet.</p>
-              <p className="text-xs">Add specialists on the right and send a message.</p>
+            <div className="h-full flex flex-col items-center justify-center px-8 max-w-lg mx-auto text-center">
+              <ion-icon name="document-text-outline" className="text-4xl text-white/40 mb-4" />
+              <h3 className="font-medium text-white/80 mb-2">{projectName ?? 'Project'}</h3>
+              <p className="text-sm text-white/60 leading-relaxed">
+                {projectDescription ?? 'No project summary available.'}
+              </p>
+              <p className="text-xs text-white/40 mt-4">Add specialists on the right and send a message to start the conversation.</p>
             </div>
           ) : (
             allMessages.map((m) => {
@@ -229,12 +247,12 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
               <ion-icon name="document-text" className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="font-semibold text-white">{project?.name ?? 'Project'}</h3>
+              <h3 className="font-semibold text-white">{projectName ?? 'Project'}</h3>
               <p className="text-xs text-white/50">Group chat</p>
             </div>
           </div>
-          {project?.description && (
-            <p className="text-sm text-white/60 line-clamp-2">{project.description}</p>
+          {projectDescription && (
+            <p className="text-sm text-white/60 line-clamp-2">{projectDescription}</p>
           )}
         </div>
 

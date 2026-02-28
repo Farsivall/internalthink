@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
+    slug TEXT UNIQUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -31,6 +32,18 @@ CREATE TABLE IF NOT EXISTS decisions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Indexes on project_id for both context_sources and decisions
+-- project_chat_messages — chat thread per project (user + specialist messages)
+CREATE TABLE IF NOT EXISTS project_chat_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    sender TEXT NOT NULL,
+    text TEXT NOT NULL,
+    thinking_process TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_context_sources_project_id ON context_sources(project_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_project_id ON decisions(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_chat_messages_project_id ON project_chat_messages(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_chat_messages_created_at ON project_chat_messages(created_at);
