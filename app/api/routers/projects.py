@@ -1,3 +1,4 @@
+import logging
 import uuid
 from fastapi import APIRouter, HTTPException, status
 from uuid import UUID
@@ -7,6 +8,7 @@ from app.schemas.projects import ProjectCreate, ProjectResponse
 from app.db.client import get_supabase
 from app.db.local_store import add_local_project, get_local_project as get_local_project_store, get_all_local_projects
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Fallback projects when Supabase not configured (chat-only mode)
@@ -27,15 +29,17 @@ def _is_uuid(s: str) -> bool:
 
 @router.get("/", response_model=List[ProjectResponse])
 def get_projects():
-    supabase = get_supabase()
-    if not supabase:
-        local = get_all_local_projects()
-        return FALLBACK_PROJECTS + [ProjectResponse(**p) for p in local]
     try:
+        supabase = get_supabase()
+        if not supabase:
+            local = get_all_local_projects()
+            items = FALLBACK_PROJECTS + [ProjectResponse(**p) for p in local]
+            return items
         response = supabase.table("projects").select("*").execute()
         return response.data or FALLBACK_PROJECTS
-    except Exception:
-        return FALLBACK_PROJECTS
+    except Exception as e:
+        logger.exception("get_projects failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)[:200])
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(project: ProjectCreate):
@@ -60,18 +64,18 @@ def create_project(project: ProjectCreate):
 @router.get("/{id_or_slug}", response_model=ProjectResponse)
 def get_project(id_or_slug: str):
     """Get a single project by UUID or slug (e.g. proj-1)."""
-    for p in FALLBACK_PROJECTS:
-        if str(p.id) == id_or_slug or (p.slug and p.slug == id_or_slug):
-            return p
-
-    local = get_local_project_store(id_or_slug)
-    if local:
-        return ProjectResponse(**local)
-
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=404, detail="Project not found")
     try:
+        for p in FALLBACK_PROJECTS:
+            if str(p.id) == id_or_slug or (p.slug and p.slug == id_or_slug):
+                return p
+
+        local = get_local_project_store(id_or_slug)
+        if local:
+            return ProjectResponse(**local)
+
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(status_code=404, detail="Project not found")
         if _is_uuid(id_or_slug):
             r = supabase.table("projects").select("*").eq("id", id_or_slug).limit(1).execute()
         else:
@@ -82,7 +86,8 @@ def get_project(id_or_slug: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("get_project failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
+            detail=str(e)[:200]
         )

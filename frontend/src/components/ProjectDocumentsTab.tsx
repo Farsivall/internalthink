@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from 'react'
-import { getContextSources } from '../api/context'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { getContextSources, uploadDocument } from '../api/context'
 import type { ContextSource } from '../api/context'
+import type { PermittedSpecialists } from '../api/context'
 import { getProjectDocuments, mockSpecialists } from '../data/mock'
 import type { ProjectDocument } from '../data/mock'
 
@@ -34,10 +35,15 @@ function toProjectDocument(c: ContextSource): ProjectDocument {
   }
 }
 
+const ACCEPT_FILES = '.pdf,.txt,text/plain,application/pdf'
+
 export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
   const [docs, setDocs] = useState<ProjectDocument[]>([])
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [personaByDoc, setPersonaByDoc] = useState<Record<string, Set<string>>>({})
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     getContextSources(projectId)
@@ -75,20 +81,79 @@ export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
 
   const getPersonasForDoc = (docId: string) => personaByDoc[docId] ?? new Set<string>()
 
+  const refetch = useCallback(() => {
+    setLoading(true)
+    getContextSources(projectId)
+      .then((data) => {
+        const mapped = data.map(toProjectDocument)
+        setDocs(mapped)
+        const next: Record<string, Set<string>> = {}
+        mapped.forEach((d) => {
+          next[d.id] = new Set(d.personaIds ?? [])
+        })
+        setPersonaByDoc(next)
+      })
+      .catch(() => {
+        const fallback = getProjectDocuments(projectId)
+        setDocs(fallback)
+        const next: Record<string, Set<string>> = {}
+        fallback.forEach((d) => {
+          next[d.id] = new Set(d.personaIds ?? [])
+        })
+        setPersonaByDoc(next)
+      })
+      .finally(() => setLoading(false))
+  }, [projectId])
+
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files
+      if (!files?.length) return
+      setUploadError(null)
+      setUploading(true)
+      const permitted: PermittedSpecialists = 'all'
+      try {
+        for (let i = 0; i < files.length; i++) {
+          await uploadDocument(projectId, files[i], files[i].name || undefined, permitted)
+        }
+        refetch()
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Upload failed')
+      } finally {
+        setUploading(false)
+        e.target.value = ''
+      }
+    },
+    [projectId, refetch]
+  )
+
   return (
     <div className="animate-fade-in">
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ACCEPT_FILES}
+        className="hidden"
+        onChange={handleFileSelect}
+      />
       <div className="flex items-center justify-between mb-6">
         <p className="text-white/60 text-sm">
           Attach documents, Slack exports, and codebase context. Choose which specialists can use each one.
         </p>
         <button
           type="button"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600/80 text-white text-sm font-medium hover:bg-emerald-500/80 border border-emerald-500/40 transition-colors"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600/80 text-white text-sm font-medium hover:bg-emerald-500/80 border border-emerald-500/40 transition-colors disabled:opacity-50"
         >
           <ion-icon name="add-circle" />
-          Add attachment
+          {uploading ? 'Uploading…' : 'Attach files'}
         </button>
       </div>
+      {uploadError && (
+        <p className="text-amber-400/90 text-sm mb-4">{uploadError}</p>
+      )}
 
       {loading ? (
         <div className="text-white/50 py-8">Loading documents…</div>
@@ -101,10 +166,12 @@ export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
           </p>
           <button
             type="button"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 text-sm text-white/80 hover:bg-white/15 transition-colors mx-auto"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 text-sm text-white/80 hover:bg-white/15 transition-colors mx-auto disabled:opacity-50"
           >
             <ion-icon name="add" />
-            Add first attachment
+            {uploading ? 'Uploading…' : 'Attach files'}
           </button>
         </div>
       ) : (

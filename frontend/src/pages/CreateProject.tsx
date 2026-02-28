@@ -162,8 +162,21 @@ export function CreateProject() {
                 ) : (
                   <input
                     type="file"
+                    multiple
                     accept=".pdf,.txt,text/plain,application/pdf"
-                    onChange={(e) => updateDoc(doc.id, { file: e.target.files?.[0] ?? null })}
+                    onChange={(e) => {
+                      const files = e.target.files
+                      if (!files?.length) return
+                      if (files.length === 1) {
+                        updateDoc(doc.id, { file: files[0] })
+                        return
+                      }
+                      updateDoc(doc.id, { file: files[0] })
+                      for (let i = 1; i < files.length; i++) {
+                        setDocuments((d) => [...d, { ...INITIAL_DOC, id: crypto.randomUUID(), mode: 'file', file: files[i], label: files[i].name || '' }])
+                      }
+                      e.target.value = ''
+                    }}
                     className="w-full text-sm text-white/80 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-600/80 file:text-white"
                   />
                 )}

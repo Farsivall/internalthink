@@ -83,7 +83,7 @@ Instructions for your reply format:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-5-20250929",
-            max_tokens=800,
+            max_tokens=450,
             system=system,
             messages=[
                 {"role": "user", "content": user_message},

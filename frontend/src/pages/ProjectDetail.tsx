@@ -106,7 +106,14 @@ export function ProjectDetail() {
         </button>
       </nav>
 
-      {activeTab === 'chat' && project.id && <ProjectChatTab projectId={project.id} projectName={project.name} projectDescription={project.description} />}
+      {activeTab === 'chat' && project.id && (
+        <ProjectChatTab
+          projectId={project.id}
+          projectName={project.name}
+          projectDescription={project.description}
+          onOpenDocuments={() => setActiveTab('documents')}
+        />
+      )}
       {activeTab === 'documents' && project.id && <ProjectDocumentsTab projectId={project.id} />}
       {activeTab === 'decisions' && project.id && <ProjectDecisionHappinessTab projectId={project.id} />}
     </div>
