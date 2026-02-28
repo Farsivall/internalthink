@@ -12,6 +12,11 @@ class ContextSourceCreate(BaseModel):
     content: str
     label: Optional[str] = None
 
+class GitHubContextRequest(BaseModel):
+    project_id: UUID
+    repo_url: str
+    label: Optional[str] = None
+
 class ContextSourceResponse(BaseModel):
     id: UUID
     project_id: UUID

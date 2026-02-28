@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
     elevenlabs_api_key: Optional[str] = None
+    github_token: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
