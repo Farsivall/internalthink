@@ -29,6 +29,15 @@ def _get_anthropic_key() -> str | None:
     return None
 
 
+def _strip_markdown(text: str) -> str:
+    """Remove common markdown formatting from text."""
+    text = re.sub(r"^#+\s+", "", text, flags=re.MULTILINE)  # headers
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)  # bold
+    text = re.sub(r"\*(.+?)\*", r"\1", text)  # italic
+    text = re.sub(r"^[-•]\s+", "", text, flags=re.MULTILINE)  # bullet points
+    return text.strip()
+
+
 def _parse_thinking(text: str) -> tuple[str, str]:
     """Extract thinking process from response; return (main_text, thinking)."""
     thinking = ""
@@ -39,7 +48,7 @@ def _parse_thinking(text: str) -> tuple[str, str]:
             text = parts[0].strip()
     if not thinking:
         thinking = "Applied specialist lens to the question. Generated response based on domain expertise."
-    return (text.strip(), thinking.strip())
+    return (_strip_markdown(text), _strip_markdown(thinking))
 
 
 def call_specialist(
@@ -52,7 +61,13 @@ def call_specialist(
     Returns (response_text, thinking_process). context_str is appended to the system prompt.
     """
     system = get_system_prompt(specialist_id)
-    system += "\n\n**Instructions:** Reply as this specialist. Be concise (2–4 sentences). Include your reasoning. After your main reply, add a line 'Thinking process:' followed by 1–3 bullet points describing how you arrived at your answer — this will be shown when the user clicks your message."
+    system += """
+
+Instructions for your reply format:
+- Reply in plain text only. No markdown, no bold (**), no headers (#), no bullet points.
+- Do NOT start with a title or label like "Financial Analysis:" or "Legal Review:". Just start your answer directly.
+- Write 2–4 sentences. Be direct and actionable.
+- After your main reply, on a new line write exactly "Thinking process:" followed by 1–3 short sentences describing how you arrived at your answer (this is shown when the user expands your message)."""
 
     if context_str and context_str != "(No context available for this specialist.)":
         system += f"\n\n**Project Context (use this to inform your analysis):**\n{context_str}"
