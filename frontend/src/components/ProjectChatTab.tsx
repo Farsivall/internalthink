@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Specialist, ThreadMessage } from '../data/mock'
 import { mockSpecialists, getProjectChat, getProject } from '../data/mock'
+import { sendChatMessage } from '../api/chat'
 
 export function ProjectChatTab({ projectId }: { projectId: string }) {
   const project = getProject(projectId)
@@ -27,7 +28,7 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
     })
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = input.trim()
     if (!text) return
     setInput('')
@@ -39,20 +40,30 @@ export function ProjectChatTab({ projectId }: { projectId: string }) {
     }
     setLocalMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
-    setTimeout(() => {
-      setLocalMessages((prev) => [
-        ...prev,
-        {
-          id: `local-spec-${Date.now()}`,
-          sender: Array.from(selectedIds)[0] ?? 'legal',
-          text: 'Reply from specialist (mock). Connect backend to get real responses.',
-          at: new Date().toISOString(),
-          thinkingProcess:
-            '1. Parsed user query and identified key decision factors.\n2. Retrieved relevant context from attached documents (product brief, Slack).\n3. Applied specialist lens: risk assessment, compliance check, market fit.\n4. Generated response with caveats. [Mock – integrate AI for real reasoning.]',
-        },
-      ])
+    const specialistIds = Array.from(selectedIds)
+    try {
+      const { responses } = await sendChatMessage(projectId, text, specialistIds)
+      const now = new Date().toISOString()
+      const newMessages: ThreadMessage[] = responses.map((r, i) => ({
+        id: `local-spec-${Date.now()}-${i}`,
+        sender: r.specialist_id,
+        text: r.text,
+        at: now,
+        thinkingProcess: r.thinking_process,
+      }))
+      setLocalMessages((prev) => [...prev, ...newMessages])
+    } catch (err) {
+      const fallback: ThreadMessage = {
+        id: `local-spec-${Date.now()}`,
+        sender: specialistIds[0] ?? 'legal',
+        text: `Could not reach AI: ${err instanceof Error ? err.message : 'Unknown error'}. Is the backend running at http://localhost:8000?`,
+        at: new Date().toISOString(),
+        thinkingProcess: 'Backend unavailable or API key not configured.',
+      }
+      setLocalMessages((prev) => [...prev, fallback])
+    } finally {
       setIsLoading(false)
-    }, 800)
+    }
   }
 
   const specialistsInChat = mockSpecialists.filter((s) => selectedIds.has(s.id))

@@ -68,7 +68,7 @@ export interface Specialist {
   color: string
 }
 
-/** Document attachment on a project */
+/** Document attachment on a project; personaIds = which specialists can use this context */
 export interface ProjectDocument {
   id: string
   projectId: string
@@ -76,6 +76,8 @@ export interface ProjectDocument {
   type: 'document' | 'slack' | 'codebase'
   label?: string
   addedAt: string
+  /** Specialist IDs that have access to this context (empty = none) */
+  personaIds: string[]
 }
 
 const PERSONA_COLORS: Record<string, string> = {
@@ -126,10 +128,10 @@ export const mockSpecialistHappiness: Record<string, Record<string, number>> = {
 
 /** Documents attached to each project */
 export const mockProjectDocuments: ProjectDocument[] = [
-  { id: 'doc1', projectId: 'proj-1', name: 'Product brief.pdf', type: 'document', label: 'Pitch Deck', addedAt: '2025-02-25T10:00:00Z' },
-  { id: 'doc2', projectId: 'proj-1', name: '#product (Slack export)', type: 'slack', label: '#product', addedAt: '2025-02-26T14:00:00Z' },
-  { id: 'doc3', projectId: 'proj-1', name: 'Repo summary', type: 'codebase', label: 'GitHub', addedAt: '2025-02-27T09:00:00Z' },
-  { id: 'doc4', projectId: 'proj-2', name: 'Vendor comparison.xlsx', type: 'document', addedAt: '2025-02-24T11:00:00Z' },
+  { id: 'doc1', projectId: 'proj-1', name: 'Product brief.pdf', type: 'document', label: 'Pitch Deck', addedAt: '2025-02-25T10:00:00Z', personaIds: ['legal', 'financial', 'technical', 'bd', 'tax'] },
+  { id: 'doc2', projectId: 'proj-1', name: '#product (Slack export)', type: 'slack', label: '#product', addedAt: '2025-02-26T14:00:00Z', personaIds: ['legal', 'financial', 'technical', 'bd'] },
+  { id: 'doc3', projectId: 'proj-1', name: 'Repo summary', type: 'codebase', label: 'GitHub', addedAt: '2025-02-27T09:00:00Z', personaIds: ['technical'] },
+  { id: 'doc4', projectId: 'proj-2', name: 'Vendor comparison.xlsx', type: 'document', addedAt: '2025-02-24T11:00:00Z', personaIds: ['financial', 'bd'] },
 ]
 
 export const mockProjects: Project[] = [
