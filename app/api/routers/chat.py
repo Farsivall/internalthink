@@ -11,6 +11,8 @@ from fastapi import APIRouter, HTTPException
 from app.schemas.chat import ChatRequest, ChatResponse, SpecialistResponse
 from app.engine.chat import call_specialist
 from app.personas import SPECIALISTS
+from app.personas.definitions import filter_context_for_specialist
+from app.services.context import get_context_for_project
 from app.db.client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -38,8 +40,8 @@ def _resolve_project_uuid(project_id: str) -> str | None:
         return None
 
 
-def _call_sync(specialist_id: str, message: str) -> SpecialistResponse:
-    text, thinking = call_specialist(specialist_id, message)
+def _call_sync(specialist_id: str, message: str, context_str: str) -> SpecialistResponse:
+    text, thinking = call_specialist(specialist_id, message, context_str)
     return SpecialistResponse(
         specialist_id=specialist_id,
         text=text,
@@ -80,6 +82,9 @@ async def chat(request: ChatRequest):
         if sid not in SPECIALISTS:
             raise HTTPException(status_code=400, detail=f"Unknown specialist: {sid}")
 
+    # Fetch context sources for the project and filter per specialist
+    sources = get_context_for_project(request.project_id)
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -87,7 +92,10 @@ async def chat(request: ChatRequest):
         asyncio.set_event_loop(loop)
 
     tasks = [
-        loop.run_in_executor(executor, _call_sync, sid, request.message)
+        loop.run_in_executor(
+            executor, _call_sync, sid, request.message,
+            filter_context_for_specialist(sid, sources),
+        )
         for sid in request.specialist_ids
     ]
 

@@ -6,16 +6,16 @@ Each specialist has domain expertise, hard rules, and context permissions.
 from dataclasses import dataclass
 from typing import Literal
 
-ContextType = Literal["document", "slack", "codebase"]
+ContextType = Literal["document", "codebase"]
 
 # Permissions: which context types each specialist can see
-# Legal: documents + slack | Financial: documents + slack | Technical: documents + slack + codebase
-# BD: documents + slack | Tax: documents only
+# Legal: documents | Financial: documents | Technical: documents + codebase
+# BD: documents | Tax: documents only
 PERMISSIONS: dict[str, list[ContextType]] = {
-    "legal": ["document", "slack"],
-    "financial": ["document", "slack"],
-    "technical": ["document", "slack", "codebase"],
-    "bd": ["document", "slack"],
+    "legal": ["document"],
+    "financial": ["document"],
+    "technical": ["document", "codebase"],
+    "bd": ["document"],
     "tax": ["document"],
 }
 
@@ -136,18 +136,18 @@ def get_system_prompt(specialist_id: str) -> str:
 def filter_context_for_specialist(
     specialist_id: str,
     sources: list[dict],
-    persona_ids_per_source: dict[str, list[str]] | None = None,
 ) -> str:
     allowed_types = set(PERMISSIONS.get(specialist_id, []))
     parts: list[str] = []
     for src in sources:
+        # Type-based filtering
         src_type = src.get("type", "document")
         if src_type not in allowed_types:
             continue
-        if persona_ids_per_source:
-            doc_id = str(src.get("id", ""))
-            allowed_personas = persona_ids_per_source.get(doc_id, [])
-            if allowed_personas and specialist_id not in allowed_personas:
+        # Per-document access control via permitted_specialists field
+        permitted = src.get("permitted_specialists", "all")
+        if permitted != "all":
+            if isinstance(permitted, list) and specialist_id not in permitted:
                 continue
         label = src.get("label", src_type)
         content = src.get("content", "")

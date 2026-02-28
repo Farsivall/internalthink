@@ -1,5 +1,6 @@
 """
-Chat engine — calls OpenAI or Anthropic with specialist prompts. No document context.
+Chat engine — calls OpenAI or Anthropic with specialist prompts.
+Context from project documents and codebase summaries is included in the system prompt.
 """
 
 import os
@@ -52,10 +53,13 @@ def call_specialist(
 ) -> tuple[str, str]:
     """
     Call AI as a specialist. Uses OpenAI (OPEN_API_KEY) if set, else Anthropic.
-    Returns (response_text, thinking_process). No document context.
+    Returns (response_text, thinking_process). context_str is appended to the system prompt.
     """
     system = get_system_prompt(specialist_id)
     system += "\n\n**Instructions:** Reply as this specialist. Be concise (2–4 sentences). Include your reasoning. After your main reply, add a line 'Thinking process:' followed by 1–3 bullet points describing how you arrived at your answer — this will be shown when the user clicks your message."
+
+    if context_str and context_str != "(No context available for this specialist.)":
+        system += f"\n\n**Project Context (use this to inform your analysis):**\n{context_str}"
 
     # Use OpenAI only (OPEN_API_KEY or OPENAI_API_KEY)
     openai_key = _get_openai_key()

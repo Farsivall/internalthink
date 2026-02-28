@@ -72,16 +72,14 @@ PERSONA_ACCESS: dict[str, list[str]] = {
 
 
 def get_context_for_project(project_id: str) -> list[dict]:
-    """Fetch context sources for a project. Uses Supabase when configured, else mock."""
+    """Fetch context sources for a project. Uses Supabase → local store → mock fallback."""
     supabase = get_supabase()
     if supabase:
         try:
-            # project_id might be UUID (from Supabase) or string like proj-1
             pid = str(project_id)
             if _is_uuid(pid):
                 response = supabase.table("context_sources").select("*").eq("project_id", pid).order("created_at").execute()
                 rows = response.data or []
-                # Normalize to our format: id, project_id, type, label, content
                 return [
                     {
                         "id": str(r.get("id", "")),
@@ -89,23 +87,23 @@ def get_context_for_project(project_id: str) -> list[dict]:
                         "type": r.get("type", "document"),
                         "label": r.get("label"),
                         "content": r.get("content", ""),
+                        "permitted_specialists": r.get("permitted_specialists", "all"),
                     }
                     for r in rows
                 ]
         except Exception:
             pass
-    # Fallback to mock for proj-1, proj-2, or when Supabase fails
+
+    # Try local store (in-memory mode)
+    from app.db.local_store import get_local_context, resolve_local_project_id
+    local_pid = resolve_local_project_id(project_id) if not _is_uuid(project_id) else project_id
+    if local_pid:
+        local_ctx = get_local_context(local_pid)
+        if local_ctx:
+            return local_ctx
+
+    # Fallback to mock for proj-1, proj-2
     return [s for s in MOCK_CONTEXT if s["project_id"] == project_id]
-
-
-def get_persona_access_for_project(project_id: str) -> dict[str, list[str]]:
-    """Return doc_id -> persona_ids. Uses type-based permissions for Supabase rows; mock has explicit access."""
-    sources = get_context_for_project(project_id)
-    # For mock ids, use PERSONA_ACCESS
-    if any(s["project_id"] in ("proj-1", "proj-2") for s in sources):
-        return {s["id"]: PERSONA_ACCESS.get(s["id"], []) for s in sources}
-    # For Supabase: no per-doc persona_ids in schema yet — use empty to fall back to type-based
-    return {str(s["id"]): [] for s in sources}
 
 
 def _is_uuid(s: str) -> bool:
