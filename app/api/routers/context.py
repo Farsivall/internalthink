@@ -1,12 +1,16 @@
+import json
 import logging
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, status, Query, UploadFile, File, Form
 from pydantic import ValidationError
-from typing import List
+from typing import List, Optional
 from uuid import UUID
-from app.schemas.context import ContextSourceCreate, ContextSourceResponse, GitHubContextRequest
+from app.schemas.context import (
+    ContextSourceCreate, ContextSourceResponse, GitHubContextRequest, DocumentTextRequest,
+)
 from app.db.client import get_supabase
 from app.services.github import parse_repo_url, fetch_file_tree, select_important_files, fetch_file_contents
 from app.services.summariser import summarise_codebase
+from app.services.documents import extract_text_from_pdf, truncate_to_word_limit
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,113 @@ def create_context_source(source: ContextSourceCreate):
     except Exception as e:
         # Pydantic validates the type field before we get here (422 Unprocessable Entity)
         # Database constraint errors would surface here as a generic exception
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+@router.post("/document", response_model=ContextSourceResponse, status_code=status.HTTP_201_CREATED)
+def create_document_text(request: DocumentTextRequest):
+    """Store a plain text document as a context source."""
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+    content = truncate_to_word_limit(request.content)
+    label = request.label or "Document"
+    data = {
+        "project_id": str(request.project_id),
+        "type": "document",
+        "label": label,
+        "content": content,
+        "permitted_specialists": json.dumps(request.permitted_specialists),
+    }
+
+    try:
+        response = supabase.table("context_sources").insert(data).execute()
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to store document")
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+@router.post("/document/upload", response_model=ContextSourceResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document_file(
+    project_id: str = Form(...),
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(None),
+    permitted_specialists: Optional[str] = Form(None),
+):
+    """Upload a PDF or text file, extract text, and store as a document context source."""
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+    file_bytes = await file.read()
+
+    # Detect file type and extract text
+    filename = file.filename or ""
+    content_type = file.content_type or ""
+
+    if filename.lower().endswith(".pdf") or content_type == "application/pdf":
+        try:
+            text = extract_text_from_pdf(file_bytes)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to read PDF: {str(e)}"
+            )
+    else:
+        # Plain text file
+        try:
+            text = file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File is not valid UTF-8 text. Please upload a PDF or plain text file."
+            )
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File contains no extractable text. Please paste the content manually instead."
+        )
+
+    text = truncate_to_word_limit(text)
+
+    # Parse permitted_specialists from form string
+    specialists_value = "all"
+    if permitted_specialists:
+        try:
+            parsed = json.loads(permitted_specialists)
+            if isinstance(parsed, list):
+                specialists_value = parsed
+            elif parsed == "all":
+                specialists_value = "all"
+        except json.JSONDecodeError:
+            specialists_value = "all"
+
+    data = {
+        "project_id": project_id,
+        "type": "document",
+        "label": label or filename or "Uploaded Document",
+        "content": text,
+        "permitted_specialists": json.dumps(specialists_value),
+    }
+
+    try:
+        response = supabase.table("context_sources").insert(data).execute()
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to store document")
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
