@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 .env
 supabase/.temp/
+progress.md

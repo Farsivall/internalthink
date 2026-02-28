@@ -11,13 +11,14 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- context_sources — documents/slack/codebase attached to a project (type enforced at DB level)
+-- context_sources — documents/codebase attached to a project (type enforced at DB level)
 CREATE TABLE IF NOT EXISTS context_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('document', 'slack', 'codebase')),
+    type TEXT NOT NULL CHECK (type IN ('document', 'codebase')),
     label TEXT,
     content TEXT NOT NULL,
+    permitted_specialists JSONB DEFAULT '"all"'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
