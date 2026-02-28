@@ -1,5 +1,5 @@
 """
-Chat engine — calls OpenAI or Anthropic with specialist prompts.
+Chat engine — calls Anthropic Claude with specialist prompts.
 Context from project documents and codebase summaries is included in the system prompt.
 """
 
@@ -8,18 +8,15 @@ import re
 from app.personas import get_system_prompt
 
 
-def _get_openai_key() -> str | None:
-    """Get OpenAI/Open API key from env or .env."""
-    for env_key in ("OPENAI_API_KEY", "OPEN_API_KEY"):
-        key = os.environ.get(env_key)
-        if key:
-            return key
+def _get_anthropic_key() -> str | None:
+    """Get Anthropic API key from env or .env."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
     try:
         from app.core.config import settings
-        if settings.openai_api_key:
-            return settings.openai_api_key
-        if settings.open_api_key:
-            return settings.open_api_key
+        if settings.anthropic_api_key:
+            return settings.anthropic_api_key
     except Exception:
         pass
     for p in [os.path.join(os.path.dirname(__file__), "..", "..", ".env"), ".env"]:
@@ -27,9 +24,8 @@ def _get_openai_key() -> str | None:
         if os.path.exists(path):
             with open(path) as f:
                 for line in f:
-                    for prefix in ("OPENAI_API_KEY=", "OPEN_API_KEY="):
-                        if line.startswith(prefix):
-                            return line.split("=", 1)[1].strip().strip('"\'')
+                    if line.startswith("ANTHROPIC_API_KEY="):
+                        return line.split("=", 1)[1].strip().strip('"\'')
     return None
 
 
@@ -52,7 +48,7 @@ def call_specialist(
     context_str: str = "",
 ) -> tuple[str, str]:
     """
-    Call AI as a specialist. Uses OpenAI (OPEN_API_KEY) if set, else Anthropic.
+    Call Anthropic Claude as a specialist.
     Returns (response_text, thinking_process). context_str is appended to the system prompt.
     """
     system = get_system_prompt(specialist_id)
@@ -61,25 +57,24 @@ def call_specialist(
     if context_str and context_str != "(No context available for this specialist.)":
         system += f"\n\n**Project Context (use this to inform your analysis):**\n{context_str}"
 
-    # Use OpenAI only (OPEN_API_KEY or OPENAI_API_KEY)
-    openai_key = _get_openai_key()
-    if not openai_key:
+    api_key = _get_anthropic_key()
+    if not api_key:
         return (
-            "Analysis unavailable — OPEN_API_KEY not configured in .env.",
+            "Analysis unavailable — ANTHROPIC_API_KEY not configured in .env.",
             "Backend missing API key.",
         )
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
             max_tokens=800,
+            system=system,
             messages=[
-                {"role": "system", "content": system},
                 {"role": "user", "content": user_message},
             ],
         )
-        text = response.choices[0].message.content or ""
+        text = response.content[0].text if response.content else ""
         return _parse_thinking(text)
     except Exception as e:
         return (
