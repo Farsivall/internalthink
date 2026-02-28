@@ -6,14 +6,23 @@ and applied via Supabase (Dashboard, CLI, or MCP).
 from supabase import create_client, Client
 from app.core.config import settings
 
+_supabase: Client | None = None
 
-def get_supabase() -> Client:
+
+def get_supabase() -> Client | None:
     """
-    Returns the configured Supabase client (service role).
-    This is the single entry point for all DB access in the backend.
+    Returns the configured Supabase client (service role), or None if not configured.
     """
-    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+    global _supabase
+    if _supabase is not None:
+        return _supabase
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        return None
+    if "your_supabase" in (settings.supabase_url or "").lower():
+        return None
+    _supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    return _supabase
 
 
-# Single shared client for the app lifecycle
-supabase = get_supabase()
+# Lazy access — use get_supabase() for code that handles None
+supabase = None  # Deprecated: use get_supabase()

@@ -9,8 +9,8 @@ def health_check():
         "status": "OK",
         "keys_loaded": {
             "anthropic": bool(settings.anthropic_api_key),
-            "supabase_url": bool(settings.supabase_url),
-            "supabase_service_role": bool(settings.supabase_service_role_key),
+            "supabase_url": bool(settings.supabase_url) and "your_supabase" not in (settings.supabase_url or "").lower(),
+            "supabase_service_role": bool(settings.supabase_service_role_key) and "your_supabase" not in (settings.supabase_service_role_key or "").lower(),
             "elevenlabs": bool(settings.elevenlabs_api_key),
         }
     }

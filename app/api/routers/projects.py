@@ -2,12 +2,15 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import ValidationError
 from typing import List
 from app.schemas.projects import ProjectCreate, ProjectResponse
-from app.db.client import supabase
+from app.db.client import get_supabase
 
 router = APIRouter()
 
 @router.get("/", response_model=List[ProjectResponse])
 def get_projects():
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
     try:
         response = supabase.table("projects").select("*").execute()
         return response.data
@@ -19,6 +22,9 @@ def get_projects():
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(project: ProjectCreate):
+    supabase = get_supabase()
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
     try:
         response = supabase.table("projects").insert(project.model_dump(exclude_none=True)).execute()
         if not response.data:
