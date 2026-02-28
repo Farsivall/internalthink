@@ -4,20 +4,16 @@ Saves messages to Supabase when configured.
 """
 
 import logging
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.chat import ChatRequest, ChatResponse, SpecialistResponse
-from app.engine.chat import call_specialist
 from app.personas import SPECIALISTS
-from app.personas.definitions import filter_context_for_specialist
 from app.services.context import get_context_for_project
+from app.engine.decisions import evaluate_all_specialists
 from app.db.client import get_supabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
-executor = ThreadPoolExecutor(max_workers=5)
 
 
 def _resolve_project_uuid(project_id: str) -> str | None:
@@ -38,15 +34,6 @@ def _resolve_project_uuid(project_id: str) -> str | None:
         return None
     except Exception:
         return None
-
-
-def _call_sync(specialist_id: str, message: str, context_str: str) -> SpecialistResponse:
-    text, thinking = call_specialist(specialist_id, message, context_str)
-    return SpecialistResponse(
-        specialist_id=specialist_id,
-        text=text,
-        thinking_process=thinking,
-    )
 
 
 def _save_messages(project_uuid: str, user_text: str, responses: list[SpecialistResponse]):
@@ -82,49 +69,8 @@ async def chat(request: ChatRequest):
         if sid not in SPECIALISTS:
             raise HTTPException(status_code=400, detail=f"Unknown specialist: {sid}")
 
-    # Fetch context sources for the project and filter per specialist
     sources = get_context_for_project(request.project_id)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    tasks = [
-        loop.run_in_executor(
-            executor, _call_sync, sid, request.message,
-            filter_context_for_specialist(sid, sources),
-        )
-        for sid in request.specialist_ids
-    ]
-
-    try:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    except Exception as e:
-        logger.exception("Chat gather failed")
-        return ChatResponse(responses=[
-            SpecialistResponse(
-                specialist_id=request.specialist_ids[0],
-                text=f"Backend error: {str(e)[:100]}. Check server logs.",
-                thinking_process=str(e),
-            )
-        ])
-
-    responses: list[SpecialistResponse] = []
-    for i, r in enumerate(results):
-        if isinstance(r, Exception):
-            sid = request.specialist_ids[i]
-            logger.warning("Specialist %s failed: %s", sid, r)
-            responses.append(
-                SpecialistResponse(
-                    specialist_id=sid,
-                    text=f"Analysis unavailable: {str(r)[:80]}",
-                    thinking_process=str(r),
-                )
-            )
-        else:
-            responses.append(r)
+    responses = await evaluate_all_specialists(request.message, sources, request.specialist_ids)
 
     try:
         project_uuid = _resolve_project_uuid(request.project_id)
