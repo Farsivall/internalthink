@@ -108,7 +108,7 @@ Before specialists are called, the raw context sources attached to a project nee
 
 ### Slack Context
 
-Slack context is provided by the user as a manual paste of relevant messages, labelled with the channel name. There is no live Slack integration — the user copies and pastes the messages they consider relevant into the text field on the project setup page.
+Slack context is provided by the user as a manual paste of relevant messages, labelled with the channel name. There is no live Slack integration for the hackathon — the user copies and pastes the messages they consider relevant into the text field on the project setup page.
 
 The paste should be formatted with a channel label and the messages below it, for example:
 
@@ -121,19 +121,39 @@ Designer: what happens to existing users who signed up for the full suite?
 
 This is stored as a context source with `type: slack` and passed to permitted specialists as-is. No parsing or processing is needed — the specialists read it as plain text.
 
+This approach is intentional. The value of Slack context is not real-time access, it is giving specialists visibility into the informal reasoning and opinions of the team that never make it into formal documents. A well-chosen paste delivers exactly that. Post-hackathon, this field would be populated automatically via the Slack API's `conversations.history` endpoint — the architecture supports this swap without any structural changes.
+
+---
+
 ### Codebase Context — GitHub Summarisation
 
-Instead of pasting a manual codebase summary, the user can provide a public GitHub repository URL. The backend fetches and summarises the codebase automatically before passing it to the Technical specialist. This runs once when the user submits the GitHub URL, not on every decision.
+Instead of pasting a manual codebase summary, the user provides a public GitHub repository URL. The backend fetches and summarises the codebase automatically before passing it to the Technical specialist. This is a preprocessing step that runs once when the user submits the GitHub URL, not on every decision.
 
-**Step 1 — Fetch the file tree.** Call the GitHub API's git trees endpoint with `recursive=1` to get every file path in the repository. No file content at this stage. Support a `GITHUB_TOKEN` environment variable for authenticated requests (unauthenticated: 60/hr, authenticated: 5,000).
+**The process has three steps:**
 
-**Step 2 — Select and fetch important files.** Use a priority heuristic to select the 10–20 most architecturally significant files: README and top-level markdown; dependency manifests (`package.json`, `requirements.txt`, `pyproject.toml`, etc.); files in the top two levels of the source directory; files most recently modified. Fetch only the content of these selected files.
+**Step 1 — Fetch the file tree.** Call the GitHub API's git trees endpoint with `recursive=1` to get every file path in the repository in a single request. No file content is downloaded at this stage. This gives a full structural picture of the codebase immediately. A `GITHUB_TOKEN` environment variable should be supported for authenticated requests — unauthenticated requests are rate-limited to 60 per hour, authenticated to 5,000.
 
-**Step 3 — Summarise with a dedicated Claude call.** A separate Claude API call reads the fetched files and produces a structured codebase summary (preprocessing, not a specialist call). The prompt should ask Claude to produce: what the codebase is and does; overall architecture; key components; main dependencies; fragile or coupled areas; parts most affected by product-direction decisions. Output: 300–500 word structured summary. Store this as a context source with `type: codebase`.
+**Step 2 — Select and fetch important files.** Do not fetch every file. Use a priority heuristic to select the 10–20 most architecturally significant files:
+- README and top-level markdown documentation
+- Dependency manifests (`package.json`, `requirements.txt`, `pyproject.toml`, etc.)
+- Files in the top two levels of the source directory
+- Files most recently modified (most relevant to current decisions)
 
-Add `GITHUB_TOKEN` as an optional environment variable. If absent, requests are unauthenticated.
+Fetch only the content of these selected files.
 
-**✅ Test:** Submit a public repo URL. Confirm file tree is fetched, important files selected and downloaded, summarisation returns a coherent summary, and it is stored as a `codebase` context source referencing real file names.
+**Step 3 — Summarise with a dedicated Claude call.** Run a separate Claude API call whose sole purpose is to read the fetched files and produce a structured codebase summary. This is not a specialist call — it is a preprocessing step. The prompt should ask Claude to produce:
+- What this codebase is and what it does
+- The overall architecture (monolith, microservices, etc.)
+- The key components and what each one does
+- The main dependencies and any notable third-party integrations
+- Any areas that look fragile, complex, or heavily coupled
+- Which parts of the codebase are most likely to be affected by decisions about the product direction
+
+The output is a clean 300–500 word structured summary. Store this as the codebase context source with `type: codebase`. From this point it flows through the pipeline identically to a manually pasted codebase description — specialists receive the same formatted text either way.
+
+Add `GITHUB_TOKEN` as an optional environment variable. If absent, requests proceed unauthenticated (sufficient for the demo on a public repo). If present, use it as a Bearer token on all GitHub API calls.
+
+**✅ Test:** Submit the Universify GitHub URL (or any real public repo). Confirm the file tree is fetched, important files are selected and downloaded, and the summarisation Claude call returns a coherent structured summary. Confirm the summary is stored as a `codebase` context source. Confirm the summary references actual file names from the real repo.
 
 ---
 
@@ -170,7 +190,7 @@ There are five specialists: **Legal, Financial, Technical, Business Development,
 
 Build a function that, given a specialist name and a list of context sources, filters to only their permitted sources and assembles them into a readable context string for the prompt.
 
-**✅ Test:** Call each specialist individually against the Universify test case (see Section 13). Every specialist returns valid JSON with all required fields. Legal and BD should disagree meaningfully on the Universify pivot decision — if they don't, the prompts need more opinionated heuristics.
+**✅ Test:** Call each specialist individually against the Universify test case (see Section 13). Every specialist returns valid JSON with all required fields. The Technical specialist references actual file names from the GitHub-generated codebase summary. Legal and BD should disagree meaningfully on the Universify pivot decision — if they don't, the prompts need more opinionated heuristics.
 
 ---
 
@@ -202,7 +222,7 @@ After receiving the Financial specialist's response, validate the diagram data. 
 
 ---
 
-## Section 7 — Parallel Fan-Out
+## Section 8 — Parallel Fan-Out
 
 All five specialists must be called simultaneously, not one after another. Sequential calls would take 30–60 seconds which kills the demo. Parallel calls should complete in under 15 seconds.
 
@@ -214,7 +234,7 @@ Use `gather` with `return_exceptions=True` (or equivalent) so that if one specia
 
 ---
 
-## Section 8 — Conflict Detection
+## Section 9 — Conflict Detection
 
 After all five specialists respond, automatically detect meaningful disagreements between them.
 
@@ -228,14 +248,14 @@ This conflict data is displayed prominently in the frontend as the product's key
 
 ---
 
-## Section 9 — Decisions API (Supabase as system of record)
+## Section 10 — Decisions API (Supabase as system of record)
 
 The main endpoint: `POST /api/decisions` accepts a `project_id` and `question`, orchestrates the full evaluation, and returns the complete result. All data reads and writes go through the **Supabase client**.
 
 **The flow:**
 1. **Fetch context from Supabase:** `table("context_sources").select("*").eq("project_id", project_id).order("created_at").execute()`.
-2. Run all five specialists in parallel (Section 7).
-3. Run conflict detection on the results (Section 8).
+2. Run all five specialists in parallel (Section 8).
+3. Run conflict detection on the results (Section 9).
 4. **Persist via Supabase:** `table("decisions").insert({ project_id, question, specialist_responses, conflict_summary }).execute()`. Use the returned row (or a follow-up select by id) to get `decision_id`.
 5. Return everything to the frontend in a single response.
 
@@ -249,11 +269,11 @@ Also expose `GET /api/decisions/{id}` to retrieve a past decision by ID (Supabas
 
 If Supabase persistence fails (e.g. insert or network error), still return the evaluation result to the frontend. Log the error; do not return 500 for a failed save — the user must see their analysis.
 
-**✅ Test:** Run the full end-to-end curl test from Section 12. Confirm the response contains all five specialists, Financial has diagrams, Technical has codebase references, and at least one conflict is detected on the Universify question. Confirm the decision row appears in the `decisions` table in Supabase (via Dashboard or client).
+**✅ Test:** Run the full end-to-end curl test from Section 13. Confirm the response contains all five specialists, Financial has diagrams, Technical has codebase references, and at least one conflict is detected on the Universify question. Confirm the decision row is persisted in the `decisions` table in Supabase (via Dashboard or client).
 
 ---
 
-## Section 10 — Voice Output (Optional)
+## Section 11 — Voice Output (Optional)
 
 Only build this if Sections 1–9 are complete and working. Do not let this block the core demo.
 
@@ -267,7 +287,7 @@ If ElevenLabs is unavailable or the API key is missing, return a 503 with a clea
 
 ---
 
-## Section 11 — Error Handling Principles
+## Section 12 — Error Handling Principles
 
 The demo must never visibly crash. Apply these principles throughout:
 
@@ -283,7 +303,7 @@ Pydantic validation is the contract between the AI layer and the API layer. If a
 
 ---
 
-## Section 12 — Test Cases
+## Section 13 — Test Cases
 
 Use these three decisions throughout development to validate specialist quality. The Universify case is the primary demo — all specialists must produce genuinely insightful responses on this one.
 

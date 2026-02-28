@@ -57,6 +57,25 @@ export interface ThreadMessage {
   score?: number
   objections?: string[]
   evidenceGaps?: string[]
+  /** AI thinking/reasoning process (shown when message is clicked) */
+  thinkingProcess?: string
+}
+
+/** Specialist (persona) that can be added/removed from project chat */
+export interface Specialist {
+  id: string
+  name: string
+  color: string
+}
+
+/** Document attachment on a project */
+export interface ProjectDocument {
+  id: string
+  projectId: string
+  name: string
+  type: 'document' | 'slack' | 'codebase'
+  label?: string
+  addedAt: string
 }
 
 const PERSONA_COLORS: Record<string, string> = {
@@ -64,7 +83,54 @@ const PERSONA_COLORS: Record<string, string> = {
   p2: '#ec4899',
   p3: '#14b8a6',
   p4: '#f97316',
+  legal: '#6366f1',
+  financial: '#22c55e',
+  technical: '#0ea5e9',
+  bd: '#f59e0b',
+  tax: '#a855f7',
 }
+
+/** All available specialists (backend spec: Legal, Financial, Technical, BD, Tax) */
+export const mockSpecialists: Specialist[] = [
+  { id: 'legal', name: 'Legal', color: PERSONA_COLORS.legal },
+  { id: 'financial', name: 'Financial', color: PERSONA_COLORS.financial },
+  { id: 'technical', name: 'Technical', color: PERSONA_COLORS.technical },
+  { id: 'bd', name: 'Business Development', color: PERSONA_COLORS.bd },
+  { id: 'tax', name: 'Tax', color: PERSONA_COLORS.tax },
+]
+
+/** Project-level chat: one thread per project (key = projectId) */
+export const mockProjectChats: Record<string, ThreadMessage[]> = {
+  'proj-1': [
+    { id: 'pc1', sender: 'user', text: 'Should we narrow focus to personal statements only?', at: '2025-02-27T09:00:00Z' },
+    { id: 'pc2', sender: 'legal', text: 'That would require a ToS review and we’d need to manage user expectations for existing full-suite users. Risk: medium.', at: '2025-02-27T09:01:00Z',
+      thinkingProcess:
+        '1. Identified key legal implications: ToS changes, user consent, existing contracts.\n2. Cross-referenced with product brief and Slack context on user segments.\n3. Risk assessment: medium due to grandfathering complexity and notification requirements.\n4. Recommendation: proceed with clear migration path and 30-day notice.',
+    },
+    {
+      id: 'pc3',
+      sender: 'bd',
+      text: 'Worth considering if we have a clear distribution partner for personal-statement-only. Who’s the counterparty?', at: '2025-02-27T09:01:30Z',
+      thinkingProcess:
+        '1. Evaluated market positioning for narrow vs full-suite product.\n2. Distribution partners typically prefer focused offerings for clearer GTM.\n3. Need to validate: who would co-sell or white-label personal-statement-only?\n4. Open question to user: counterparty identification is critical for BD assessment.',
+    },
+  ],
+}
+
+/** Mock AI happiness per specialist per project (0–10) */
+export const mockSpecialistHappiness: Record<string, Record<string, number>> = {
+  'proj-1': { legal: 7, financial: 8, technical: 6, bd: 5, tax: 8 },
+  'proj-2': { legal: 6, financial: 9, technical: 7, bd: 8, tax: 7 },
+  'proj-3': { legal: 5, financial: 5, technical: 5, bd: 5, tax: 5 },
+}
+
+/** Documents attached to each project */
+export const mockProjectDocuments: ProjectDocument[] = [
+  { id: 'doc1', projectId: 'proj-1', name: 'Product brief.pdf', type: 'document', label: 'Pitch Deck', addedAt: '2025-02-25T10:00:00Z' },
+  { id: 'doc2', projectId: 'proj-1', name: '#product (Slack export)', type: 'slack', label: '#product', addedAt: '2025-02-26T14:00:00Z' },
+  { id: 'doc3', projectId: 'proj-1', name: 'Repo summary', type: 'codebase', label: 'GitHub', addedAt: '2025-02-27T09:00:00Z' },
+  { id: 'doc4', projectId: 'proj-2', name: 'Vendor comparison.xlsx', type: 'document', addedAt: '2025-02-24T11:00:00Z' },
+]
 
 export const mockProjects: Project[] = [
   {
@@ -188,4 +254,12 @@ export function getChatMessages(decisionId: string, personaId: string): ChatMess
 
 export function getThread(decisionId: string, personaId: string): ThreadMessage[] {
   return mockThreads[`${decisionId}-${personaId}`] ?? []
+}
+
+export function getProjectChat(projectId: string): ThreadMessage[] {
+  return mockProjectChats[projectId] ?? []
+}
+
+export function getProjectDocuments(projectId: string): ProjectDocument[] {
+  return mockProjectDocuments.filter((d) => d.projectId === projectId)
 }
