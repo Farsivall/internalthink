@@ -62,3 +62,119 @@ async def evaluate_all_specialists(
             responses.append(r)
 
     return responses
+
+
+async def evaluate_all_specialists_for_decision_call(
+    question: str,
+    decision_row: dict,
+    sources: list[dict],
+    specialist_ids: list[str] | None = None,
+) -> list[SpecialistResponse]:
+    """
+    Call specialists in parallel for a *decision-focused call*.
+
+    Context is built from the stored decision data plus main project documents,
+    following the behaviour described in prompt_files/chat.md.
+    """
+    ids = specialist_ids or list(SPECIALISTS.keys())
+    loop = asyncio.get_running_loop()
+
+    # Pre-index specialist responses from the stored decision for quick lookup.
+    specialist_responses = decision_row.get("specialist_responses") or []
+    by_specialist: dict[str, dict] = {}
+    if isinstance(specialist_responses, list):
+        for item in specialist_responses:
+            sid = item.get("specialist_id")
+            if sid:
+                by_specialist[sid] = item
+
+    decision_id = str(decision_row.get("id"))
+    project_label = str(decision_row.get("project_id") or "")
+    summary = decision_row.get("question", "")
+
+    async def _eval_one(sid: str) -> SpecialistResponse:
+        spec_meta = SPECIALISTS.get(sid)
+        spec_name = spec_meta.name if spec_meta else sid
+
+        # Pull precomputed outputs if available
+        item = by_specialist.get(sid, {})
+        score_0_100 = item.get("score_0_100")
+        if isinstance(score_0_100, (int, float)):
+            score_str = f"{int(score_0_100)}"
+        else:
+            score_str = ""
+        objections = item.get("objections") or []
+        if isinstance(objections, list):
+            risks_list = ", ".join(str(o) for o in objections) if objections else "None explicitly listed."
+        else:
+            risks_list = "None explicitly listed."
+
+        # Pull main project docs/evidence for this specialist
+        docs_for_spec = filter_context_for_specialist(sid, sources)
+        if not docs_for_spec or docs_for_spec == "(No context available for this specialist.)":
+            retrieved_docs = "(No additional documents or evidence were retrieved.)"
+        else:
+            retrieved_docs = docs_for_spec
+
+        # Build decision-focused context inline, mirroring prompt_files/chat.md
+        context_str = f"""
+You are an expert persona: {spec_name}.
+
+You are only reasoning about the specific decision provided. Your task is to simulate a real-time "call" where a user asks you questions about that decision.
+
+### Decision Context:
+- Decision ID: {decision_id}
+- Project: {project_label}
+- Summary: {summary}
+- Precomputed Persona Outputs:
+  - Score: {score_str} (0-100)
+  - Key Risks: {risks_list}
+  - Key Objections: {risks_list}
+  - Evidence Gaps: (not explicitly recorded; infer from missing data in the documents if relevant)
+- Relevant Documents / Evidence:
+{retrieved_docs}
+
+### Rules for Your Call Behavior:
+1. Only use the context above. Do NOT invent facts outside of the decision or documents.
+2. Respond in short, streaming-friendly sentences so the user perceives a real-time call.
+3. If the user asks about missing evidence, clearly list what is missing.
+4. Highlight trade-offs where multiple risks or objections conflict.
+5. Keep all reasoning within your domain.
+6. Do NOT recalculate scores — explain reasoning from the existing score.
+7. Make the conversation natural and explanatory, like an expert speaking to a colleague.
+
+### Output Style:
+- Friendly but authoritative.
+- Streamed in short sentences.
+- Reference documents minimally, e.g., "Based on contract section X…" if needed.
+- End each answer ready for the next user prompt.
+""".strip()
+
+        text, thinking = call_specialist(sid, question, context_str)
+        return SpecialistResponse(
+            specialist_id=sid,
+            text=text,
+            thinking_process=thinking,
+        )
+
+    # Run in parallel similar to evaluate_all_specialists
+    tasks = [loop.run_in_executor(executor, asyncio.run, _eval_one(sid)) for sid in ids]  # type: ignore[arg-type]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    responses: list[SpecialistResponse] = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            sid = ids[i]
+            logger.warning("Decision-call specialist %s failed: %s", sid, r)
+            responses.append(
+                SpecialistResponse(
+                    specialist_id=sid,
+                    text=f"Analysis unavailable: {str(r)[:80]}",
+                    thinking_process=str(r),
+                )
+            )
+        else:
+            responses.append(r)  # type: ignore[arg-type]
+
+    return responses

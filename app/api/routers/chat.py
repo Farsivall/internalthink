@@ -9,37 +9,15 @@ from fastapi import APIRouter, HTTPException
 from app.schemas.chat import ChatRequest, ChatResponse, SpecialistResponse
 from app.personas import SPECIALISTS
 from app.services.context import get_context_for_project
-from app.engine.decisions import evaluate_all_specialists
-from app.db.client import get_supabase
+from app.engine.decisions import evaluate_all_specialists, evaluate_all_specialists_for_decision_call
+from app.api.deps import require_supabase
+from app.db.project_resolve import resolve_project_uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def _resolve_project_uuid(project_id: str) -> str | None:
-    """Return project UUID for saving messages. Only returns UUID, never slug."""
-    from uuid import UUID
-    try:
-        UUID(project_id)
-        return project_id
-    except ValueError:
-        pass
-    try:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        r = supabase.table("projects").select("id").eq("slug", project_id).limit(1).execute()
-        if r.data and len(r.data) > 0:
-            return str(r.data[0]["id"])
-        return None
-    except Exception:
-        return None
-
-
-def _save_messages(project_uuid: str, user_text: str, responses: list[SpecialistResponse]):
-    supabase = get_supabase()
-    if not supabase:
-        return
+def _save_messages(supabase, project_uuid: str, user_text: str, responses: list[SpecialistResponse]):
     try:
         supabase.table("project_chat_messages").insert({
             "project_id": project_uuid,
@@ -59,7 +37,7 @@ def _save_messages(project_uuid: str, user_text: str, responses: list[Specialist
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Send a message and get responses from selected specialists. Uses Anthropic. Saves to Supabase when configured."""
+    """Send a message and get responses from selected specialists. Uses Anthropic. Saves to Supabase."""
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     if not request.specialist_ids:
@@ -69,13 +47,43 @@ async def chat(request: ChatRequest):
         if sid not in SPECIALISTS:
             raise HTTPException(status_code=400, detail=f"Unknown specialist: {sid}")
 
+    supabase = require_supabase()
     sources = get_context_for_project(request.project_id)
-    responses = await evaluate_all_specialists(request.message, sources, request.specialist_ids)
+
+    # If a decision_id is provided, treat this as a decision-focused "call"
+    # where specialists only use decision data + main project docs.
+    if request.decision_id:
+        try:
+            r = (
+                supabase.table("decisions")
+                .select("*")
+                .eq("id", request.decision_id)
+                .limit(1)
+                .execute()
+            )
+            rows = r.data or []
+            if not rows:
+                raise HTTPException(status_code=404, detail="Decision not found for chat")
+            decision_row = rows[0]
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Failed to load decision %s for chat: %s", request.decision_id, e)
+            raise HTTPException(status_code=500, detail="Failed to load decision for chat")
+
+        responses = await evaluate_all_specialists_for_decision_call(
+            question=request.message,
+            decision_row=decision_row,
+            sources=sources,
+            specialist_ids=request.specialist_ids,
+        )
+    else:
+        responses = await evaluate_all_specialists(request.message, sources, request.specialist_ids)
 
     try:
-        project_uuid = _resolve_project_uuid(request.project_id)
+        project_uuid = resolve_project_uuid(request.project_id)
         if project_uuid:
-            _save_messages(project_uuid, request.message, responses)
+            _save_messages(supabase, project_uuid, request.message, responses)
     except Exception as e:
         logger.warning("Failed to save messages: %s", e)
 

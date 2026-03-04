@@ -1,12 +1,15 @@
 from fastapi import APIRouter
 from app.core.config import settings
+from app.db.client import get_supabase
 
 router = APIRouter()
 
 @router.get("/health")
 def health_check():
+    using_supabase = get_supabase() is not None
     return {
         "status": "OK",
+        "using_supabase": using_supabase,
         "keys_loaded": {
             "openai": bool(settings.openai_api_key or settings.open_api_key),
             "anthropic": bool(settings.anthropic_api_key),

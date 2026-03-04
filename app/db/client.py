@@ -1,26 +1,16 @@
 """
-Supabase-centric data layer. All persistence goes through the Supabase client;
-no direct Postgres connection or raw SQL. Schema is defined in supabase/schema.sql
-and applied via Supabase (Dashboard, CLI, or MCP).
-
-When USE_IN_MEMORY_ONLY=1 (or SUPABASE_DISABLED=1), always returns None — all data
-uses in-memory store (app/db/local_store.py). Data is lost on server restart.
+Supabase-only data layer. All persistence goes through the Supabase client;
+no in-memory or local store. Schema is defined in supabase/schema.sql.
 """
-import os
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
 _supabase: Any = None
 
 
 def get_supabase() -> Any | None:
-    """
-    Returns the configured Supabase client (service role), or None if not configured.
-    When USE_IN_MEMORY_ONLY=1 or SUPABASE_DISABLED=1, always returns None.
-    """
-    if os.environ.get("USE_IN_MEMORY_ONLY", "").strip() in ("1", "true", "yes"):
-        return None
-    if os.environ.get("SUPABASE_DISABLED", "").strip() in ("1", "true", "yes"):
-        return None
+    """Returns the configured Supabase client (service role), or None if not configured."""
     global _supabase
     if _supabase is not None:
         return _supabase
@@ -28,6 +18,7 @@ def get_supabase() -> Any | None:
         from supabase import create_client
         from app.core.config import settings
         if not settings.supabase_url or not settings.supabase_service_role_key:
+            logger.warning("Supabase not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env")
             return None
         if "your_supabase" in (settings.supabase_url or "").lower():
             return None
@@ -36,7 +27,8 @@ def get_supabase() -> Any | None:
         client = create_client(settings.supabase_url, settings.supabase_service_role_key)
         globals()["_supabase"] = client
         return client
-    except Exception:
+    except Exception as e:
+        logger.exception("Supabase client failed: %s — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env. Service role key should be the JWT from Dashboard → Project Settings → API (service_role).", e)
         return None
 
 

@@ -1,8 +1,17 @@
 import { Link, useParams } from 'react-router-dom'
-import { mockProjects } from '../data/mock'
+import { useEffect, useState } from 'react'
+import { getProjects, type ApiProject } from '../api/projects'
 
 export function Sidebar({ open }: { open: boolean }) {
   const { projectId } = useParams()
+  const [projects, setProjects] = useState<ApiProject[]>([])
+
+  useEffect(() => {
+    getProjects()
+      .then((data) => setProjects(data))
+      .catch(() => setProjects([]))
+  }, [])
+
   return (
     <aside
       className={`${
@@ -11,7 +20,7 @@ export function Sidebar({ open }: { open: boolean }) {
     >
       <nav className="p-4 space-y-1">
         <div className="text-xs font-medium text-white/50 uppercase tracking-wider px-3 py-2">Projects</div>
-        {mockProjects.slice(0, 5).map((p) => (
+        {projects.map((p) => (
           <Link
             key={p.id}
             to={`/project/${p.id}`}

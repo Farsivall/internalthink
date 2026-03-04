@@ -6,6 +6,7 @@ export interface ChatMessage {
   text: string
   at: string
   thinkingProcess?: string
+  decisionId?: string
 }
 
 export async function getProjectChat(projectId: string): Promise<ChatMessage[]> {

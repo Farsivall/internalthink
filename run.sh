@@ -1,6 +1,6 @@
 #!/bin/sh
 # Run from project root. Loads .env and starts the API on http://localhost:8000
-# Set USE_IN_MEMORY_ONLY=1 in .env to skip Supabase and use in-memory store only.
+# Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.
 cd "$(dirname "$0")"
 . .venv/bin/activate 2>/dev/null || true
 [ -f .env ] && set -a && . ./.env && set +a 2>/dev/null || true

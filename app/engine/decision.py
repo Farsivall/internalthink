@@ -124,20 +124,52 @@ def synthesize_agreement_and_tradeoffs(
         client = OpenAI(api_key=key)
         r = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=350,
+            max_tokens=450,
             messages=[
-                {"role": "system", "content": "You summarize how a panel of specialists (Legal, Financial, Technical, etc.) view a decision. Output exactly two short paragraphs with these labels:\n\nAgreement: [What they broadly agree on, or 'No strong agreement' if views differ a lot.]\n\nTradeoffs: [Key tradeoffs or tensions between perspectives.]"},
-                {"role": "user", "content": f"Decision: {decision_title}\n\nSpecialist views:\n" + "\n".join(lines)},
+                {
+                    "role": "system",
+                    "content": (
+                        "You summarize how a panel of specialists (Legal, Financial, Technical, Business Development, Tax) "
+                        "view a single decision.\n\n"
+                        "Output MUST be exactly two labeled sections, each as a short bulleted list:\n\n"
+                        "Agreement:\n"
+                        "- [Overall one-line summary of the decision and what most specialists agree on.]\n"
+                        "- [Additional bullets for any specific shared views, referencing specialists by name where useful.]\n\n"
+                        "Tradeoffs:\n"
+                        "- [Each bullet should describe ONE key tradeoff or disagreement, and explicitly name which specialists are involved, "
+                        "e.g. 'Legal (50) vs BD (80): ...']\n"
+                        "- Focus on tensions between departments, not generic pros/cons.\n"
+                        "Do not add any other sections or prose outside these bullets."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Decision: {decision_title}\n\nSpecialist views:\n" + "\n".join(lines),
+                },
             ],
         )
         text = (r.choices[0].message.content or "").strip()
         agreement = "No strong agreement."
         tradeoffs = "—"
-        for part in re.split(r"\n\s*\n", text):
-            if part.strip().lower().startswith("agreement"):
-                agreement = re.sub(r"^Agreement\s*:?\s*", "", part, flags=re.I).strip()[:400]
-            elif part.strip().lower().startswith("tradeoff"):
-                tradeoffs = re.sub(r"^Tradeoffs?\s*:?\s*", "", part, flags=re.I).strip()[:400]
+        current_section = None
+        collected: dict[str, list[str]] = {"agreement": [], "tradeoffs": []}
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            lower = line.lower()
+            if lower.startswith("agreement"):
+                current_section = "agreement"
+                continue
+            if lower.startswith("tradeoff"):
+                current_section = "tradeoffs"
+                continue
+            if current_section and line.startswith("-"):
+                bullet = line.lstrip("-").strip()
+                if bullet:
+                    collected[current_section].append(bullet)
+        if collected["agreement"]:
+            agreement = "\n".join(collected["agreement"])[:600]
+        if collected["tradeoffs"]:
+            tradeoffs = "\n".join(collected["tradeoffs"])[:800]
         return (agreement, tradeoffs)
     except Exception as e:
         return ("Synthesis failed.", str(e)[:150])

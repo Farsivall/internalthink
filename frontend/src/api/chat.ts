@@ -14,7 +14,8 @@ export interface ChatResponse {
 export async function sendChatMessage(
   projectId: string,
   message: string,
-  specialistIds: string[]
+  specialistIds: string[],
+  decisionId?: string
 ): Promise<ChatResponse> {
   const url = API_BASE ? `${API_BASE}/api/chat` : '/api/chat'
   let res: Response
@@ -26,6 +27,7 @@ export async function sendChatMessage(
         project_id: projectId,
         message,
         specialist_ids: specialistIds,
+        ...(decisionId ? { decision_id: decisionId } : {}),
       }),
     })
   } catch (e) {

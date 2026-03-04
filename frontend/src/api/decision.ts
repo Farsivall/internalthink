@@ -9,10 +9,16 @@ export interface SpecialistScore {
 }
 
 export interface DecisionEvaluateResponse {
+  decision_id?: string | null
   decision_title: string
   scores: SpecialistScore[]
   agreement: string
   tradeoffs: string
+}
+
+export interface StoredDecisionResponse extends DecisionEvaluateResponse {
+  // decision_id is required when loading from storage
+  decision_id: string
 }
 
 export interface DecisionEvaluateInput {
@@ -40,6 +46,40 @@ export async function evaluateDecision(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail ?? `Failed to evaluate decision: ${res.statusText}`)
+  }
+  return res.json()
+}
+
+export async function getDecision(decisionId: string): Promise<StoredDecisionResponse> {
+  const url = API_BASE
+    ? `${API_BASE}/api/projects/decisions/${encodeURIComponent(decisionId)}`
+    : `/api/projects/decisions/${encodeURIComponent(decisionId)}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`Failed to load decision ${decisionId}: ${res.statusText}`)
+  }
+  return res.json()
+}
+
+export interface ProjectDecisionSummary {
+  id: string
+  project_id: string
+  title: string
+  summary: string
+  status: string
+  agreement: string
+  tradeoffs: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export async function getProjectDecisions(projectId: string): Promise<ProjectDecisionSummary[]> {
+  const url = API_BASE
+    ? `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/decisions`
+    : `/api/projects/${encodeURIComponent(projectId)}/decisions`
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`Failed to load decisions for project ${projectId}: ${res.statusText}`)
   }
   return res.json()
 }

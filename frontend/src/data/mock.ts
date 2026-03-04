@@ -59,6 +59,8 @@ export interface ThreadMessage {
   evidenceGaps?: string[]
   /** AI thinking/reasoning process (shown when message is clicked) */
   thinkingProcess?: string
+  /** Optional decision id if this message represents a decision bubble */
+  decisionId?: string
 }
 
 /** Specialist (persona) that can be added/removed from project chat */

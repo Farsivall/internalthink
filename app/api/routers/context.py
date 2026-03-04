@@ -7,13 +7,8 @@ from uuid import UUID
 from app.schemas.context import (
     ContextSourceCreate, ContextSourceResponse, GitHubContextRequest, DocumentTextRequest,
 )
-from app.db.client import get_supabase
-from app.db.local_store import (
-    resolve_local_project_id,
-    get_local_context,
-    add_local_context,
-    has_local_project,
-)
+from app.api.deps import require_supabase
+from app.db.project_resolve import resolve_project_uuid
 from app.services.github import parse_repo_url, fetch_file_tree, select_important_files, fetch_file_contents
 from app.services.summariser import summarise_codebase
 from app.services.documents import extract_text_from_pdf, truncate_to_word_limit
@@ -23,38 +18,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def _resolve_project_uuid(project_id: str) -> str | None:
-    """Resolve slug (proj-1) or UUID to project UUID."""
-    try:
-        return str(UUID(project_id))
-    except ValueError:
-        pass
-    local_pid = resolve_local_project_id(project_id)
-    if local_pid:
-        return local_pid
-    try:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        r = supabase.table("projects").select("id").eq("slug", project_id).limit(1).execute()
-        if r.data and len(r.data) > 0:
-            return str(r.data[0]["id"])
-        return None
-    except Exception:
-        return None
+    """Resolve slug or UUID to project UUID. Supabase-first when configured."""
+    return resolve_project_uuid(project_id)
 
 
 @router.get("/", response_model=List[ContextSourceResponse])
 def get_context_sources(project_id: str = Query(...)):
-    """Get context sources for a project. project_id can be slug (proj-1) or UUID."""
+    """Get context sources for a project. project_id can be slug or UUID. Supabase only."""
     pid = _resolve_project_uuid(project_id)
     if not pid:
         return []
-    supabase = get_supabase()
-    if not supabase:
-        return get_local_context(pid)
+    supabase = require_supabase()
     try:
         response = supabase.table("context_sources").select("*").eq("project_id", pid).order("created_at").execute()
-        return response.data
+        return response.data or []
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -63,9 +40,7 @@ def get_context_sources(project_id: str = Query(...)):
 
 @router.post("/", response_model=ContextSourceResponse, status_code=status.HTTP_201_CREATED)
 def create_context_source(source: ContextSourceCreate):
-    supabase = get_supabase()
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Supabase not configured")
+    supabase = require_supabase()
     try:
         data = source.model_dump(exclude_none=True)
         data["project_id"] = str(data["project_id"])
@@ -84,23 +59,17 @@ def create_context_source(source: ContextSourceCreate):
 @router.post("/document", response_model=ContextSourceResponse, status_code=status.HTTP_201_CREATED)
 def create_document_text(request: DocumentTextRequest):
     """Store a plain text document as a context source."""
-    pid = str(request.project_id)
+    pid = _resolve_project_uuid(str(request.project_id)) or str(request.project_id)
     content = truncate_to_word_limit(request.content)
     label = request.label or "Document"
 
-    supabase = get_supabase()
-    if not supabase:
-        if not has_local_project(pid):
-            raise HTTPException(status_code=404, detail="Project not found")
-        source = add_local_context(pid, "document", label, content, request.permitted_specialists)
-        return ContextSourceResponse(**source)
-
+    supabase = require_supabase()
     data = {
         "project_id": pid,
         "type": "document",
         "label": label,
         "content": content,
-        "permitted_specialists": json.dumps(request.permitted_specialists),
+        "permitted_specialists": request.permitted_specialists,
     }
     try:
         response = supabase.table("context_sources").insert(data).execute()
@@ -124,6 +93,8 @@ async def upload_document_file(
 ):
     """Upload a PDF or text file, extract text, and store as a document context source."""
     pid = _resolve_project_uuid(project_id) or project_id
+    if not pid:
+        raise HTTPException(status_code=404, detail="Project not found")
     file_bytes = await file.read()
 
     # Detect file type and extract text
@@ -170,19 +141,13 @@ async def upload_document_file(
         except json.JSONDecodeError:
             specialists_value = "all"
 
-    supabase = get_supabase()
-    if not supabase:
-        if not has_local_project(pid):
-            raise HTTPException(status_code=404, detail="Project not found")
-        source = add_local_context(pid, "document", label or filename or "Uploaded Document", text, specialists_value)
-        return ContextSourceResponse(**source)
-
+    supabase = require_supabase()
     data = {
         "project_id": pid,
         "type": "document",
         "label": label or filename or "Uploaded Document",
         "content": text,
-        "permitted_specialists": json.dumps(specialists_value),
+        "permitted_specialists": specialists_value,
     }
     try:
         response = supabase.table("context_sources").insert(data).execute()
@@ -237,21 +202,15 @@ def create_github_context(request: GitHubContextRequest):
 
     # Step 5: Store as a codebase context source
     label = request.label or f"{owner}/{repo}"
-    pid = str(request.project_id)
+    pid = _resolve_project_uuid(str(request.project_id)) or str(request.project_id)
 
-    supabase = get_supabase()
-    if not supabase:
-        if not has_local_project(pid):
-            raise HTTPException(status_code=404, detail="Project not found")
-        source = add_local_context(pid, "codebase", label, summary, request.permitted_specialists)
-        return ContextSourceResponse(**source)
-
+    supabase = require_supabase()
     data = {
         "project_id": pid,
         "type": "codebase",
         "label": label,
         "content": summary,
-        "permitted_specialists": json.dumps(request.permitted_specialists),
+        "permitted_specialists": request.permitted_specialists,
     }
     try:
         response = supabase.table("context_sources").insert(data).execute()

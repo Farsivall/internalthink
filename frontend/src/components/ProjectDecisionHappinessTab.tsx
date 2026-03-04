@@ -1,7 +1,33 @@
-import { getDecisionsByProject, mockSpecialists, mockSpecialistHappiness } from '../data/mock'
+import { useEffect, useState } from 'react'
+import { mockSpecialists, mockSpecialistHappiness } from '../data/mock'
+import { getProjectDecisions, type ProjectDecisionSummary } from '../api/decision'
 
 export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }) {
-  const decisions = getDecisionsByProject(projectId)
+  const [decisions, setDecisions] = useState<ProjectDecisionSummary[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getProjectDecisions(projectId)
+      .then((data) => {
+        if (!cancelled) setDecisions(data)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load decisions')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   const happiness = mockSpecialistHappiness[projectId] ?? {}
 
   return (
@@ -18,7 +44,15 @@ export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }
           <ion-icon name="checkmark-circle-outline" />
           {decisions.length} decision{decisions.length !== 1 ? 's' : ''} made
         </h3>
-        {decisions.length === 0 ? (
+        {loading ? (
+          <div className="rounded-xl border border-dashed border-white/20 bg-surface-800/30 p-8 text-center">
+            <p className="text-white/60 text-sm">Loading decisions…</p>
+          </div>
+        ) : error ? (
+          <div className="rounded-xl border border-dashed border-red-500/40 bg-red-950/40 p-8 text-center">
+            <p className="text-red-200 text-sm">Could not load decisions: {error}</p>
+          </div>
+        ) : decisions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/20 bg-surface-800/30 p-8 text-center">
             <ion-icon name="document-outline" className="text-4xl text-white/30 mb-2" />
             <p className="text-white/50 text-sm">No decisions recorded yet.</p>
@@ -32,7 +66,7 @@ export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }
               >
                 <div>
                   <p className="text-white font-medium">{d.title}</p>
-                  <p className="text-xs text-white/50 mt-0.5">{d.summary}</p>
+                  <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{d.summary}</p>
                 </div>
                 <span className="px-2 py-0.5 rounded text-xs bg-white/10 shrink-0">{d.status}</span>
               </li>

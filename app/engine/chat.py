@@ -66,7 +66,8 @@ def call_specialist(
 Instructions for your reply format:
 - Reply in plain text only. No markdown, no bold (**), no headers (#), no bullet points.
 - Do NOT start with a title or label like "Financial Analysis:" or "Legal Review:". Just start your answer directly.
-- Write 2–4 sentences. Be direct and actionable.
+- If the user message is a short casual greeting or acknowledgement (e.g. "hi", "hey", "hello", "thanks", "ok", or any message of 5 words or fewer that does not mention risks, tradeoffs, evidence, score, or decision), reply with just ONE short friendly sentence and do NOT start detailed analysis.
+- For substantive questions about the project or decision, write 2–4 sentences. Be direct and actionable.
 - After your main reply, on a new line write exactly "Thinking process:" followed by 1–3 short sentences describing how you arrived at your answer (this is shown when the user expands your message)."""
 
     if context_str and context_str != "(No context available for this specialist.)":

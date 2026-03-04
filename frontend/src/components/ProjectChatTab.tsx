@@ -4,8 +4,292 @@ import { mockSpecialists } from '../data/mock'
 import { sendChatMessage } from '../api/chat'
 import { getProjectChat as fetchProjectChat } from '../api/chatMessages'
 import { isVoiceAvailable, getVoiceAudio } from '../api/voice'
-import { evaluateDecision } from '../api/decision'
-import type { DecisionEvaluateResponse } from '../api/decision'
+import { evaluateDecision, getDecision, getProjectDecisions } from '../api/decision'
+import type { DecisionEvaluateResponse, ProjectDecisionSummary } from '../api/decision'
+
+const mentionMap: Record<string, string> = {
+  '@legal': 'legal',
+  '@financial': 'financial',
+  '@technical': 'technical',
+  '@bd': 'bd',
+  '@tax': 'tax',
+}
+
+function extractMentionedSpecialists(text: string): string[] {
+  const lower = text.toLowerCase()
+  const ids = new Set<string>()
+  for (const [token, id] of Object.entries(mentionMap)) {
+    if (lower.includes(token)) {
+      ids.add(id)
+    }
+  }
+  return Array.from(ids)
+}
+
+function getSpecialistColor(id: string): string {
+  const spec = mockSpecialists.find((s) => s.id === id)
+  return spec?.color ?? '#6b7280'
+}
+
+function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180
+  return {
+    x: cx + r * Math.cos(rad),
+    y: cy + r * Math.sin(rad),
+  }
+}
+
+function DecisionPieChart({ decision }: { decision: DecisionEvaluateResponse }) {
+  const total = decision.scores.reduce((sum, s) => sum + Math.max(s.score * 10, 0), 0) || 1
+  const cx = 60
+  const cy = 60
+  const r = 48
+  let cumulative = 0
+
+  const segmentData = decision.scores.map((s) => {
+    const value = Math.max(s.score * 10, 0)
+    const startAngle = (cumulative / total) * 360
+    const endAngle = ((cumulative + value) / total) * 360
+    cumulative += value
+    const midAngle = (startAngle + endAngle) / 2
+    const labelPos = polarToCartesian(cx, cy, r * 0.55, midAngle)
+    return {
+      ...s,
+      startAngle,
+      endAngle,
+      value,
+      labelPos,
+      color: getSpecialistColor(s.specialist_id),
+    }
+  })
+
+  const segments = segmentData.map((s) => {
+    const largeArc = s.endAngle - s.startAngle > 180 ? 1 : 0
+    const start = polarToCartesian(cx, cy, r, s.endAngle)
+    const end = polarToCartesian(cx, cy, r, s.startAngle)
+    const d = [
+      `M ${cx} ${cy}`,
+      `L ${start.x} ${start.y}`,
+      `A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`,
+      'Z',
+    ].join(' ')
+    return (
+      <g key={s.specialist_id}>
+        <path d={d} fill={s.color} stroke="rgba(0,0,0,0.2)" strokeWidth={1} />
+        <text
+          x={s.labelPos.x}
+          y={s.labelPos.y}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          className="fill-white text-[10px] font-bold"
+          style={{ textShadow: '0 0 2px rgba(0,0,0,0.8)' }}
+        >
+          {s.score * 10}
+        </text>
+      </g>
+    )
+  })
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <svg viewBox="0 0 120 120" className="w-36 h-36 shrink-0">
+        <g>{segments}</g>
+      </svg>
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1.5 text-[11px]">
+        {segmentData.map((s) => (
+          <span key={s.specialist_id} className="flex items-center gap-1">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: s.color }}
+            />
+            <span className="text-white/90">{s.specialist_name}</span>
+            <span className="text-white/60">({s.score * 10})</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Wrap specialist names in the text with colour-coded spans */
+function ColorCodedText({ text }: { text: string }) {
+  const names = mockSpecialists.map((s) => s.name)
+  const parts: { str: string; color?: string }[] = []
+  let remaining = text
+  while (remaining.length > 0) {
+    let best: { name: string; index: number } | null = null
+    for (const name of names) {
+      const i = remaining.indexOf(name)
+      if (i !== -1 && (best === null || i < best.index)) best = { name, index: i }
+    }
+    if (best === null) {
+      parts.push({ str: remaining })
+      break
+    }
+    if (best.index > 0) parts.push({ str: remaining.slice(0, best.index) })
+    const spec = mockSpecialists.find((s) => s.name === best!.name)
+    const color = spec ? getSpecialistColor(spec.id) : undefined
+    parts.push({ str: best.name, color })
+    remaining = remaining.slice(best.index + best.name.length)
+  }
+  return (
+    <span>
+      {parts.map((p, i) =>
+        p.color ? (
+          <span key={i} className="font-medium" style={{ color: p.color }}>
+            {p.str}
+          </span>
+        ) : (
+          <span key={i}>{p.str}</span>
+        )
+      )}
+    </span>
+  )
+}
+
+function DecisionBreakdownModal({
+  decision,
+  onClose,
+}: {
+  decision: DecisionEvaluateResponse
+  onClose: () => void
+}) {
+  const agreementItems = decision.agreement
+    .split(/[\.\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  const tradeoffItems = decision.tradeoffs
+    .split(/[\.\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <h3 className="text-sm font-semibold text-white">Decision breakdown</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-full hover:bg-white/10 text-white/70"
+          >
+            <ion-icon name="close" className="text-lg" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <div>
+            <p className="text-xs text-white/50 mb-1">Decision</p>
+            <p className="text-sm font-medium text-white">{decision.decision_title}</p>
+          </div>
+
+          <div className="space-y-5">
+            <div className="flex justify-center">
+              <DecisionPieChart decision={decision} />
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-medium text-white/70 mb-1.5 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500/80" />
+                  What they agree on
+                </p>
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                  <div className="divide-y divide-white/10">
+                    {agreementItems.map((s, i) => (
+                      <div key={i} className="px-3 py-2.5 text-sm text-white/85 leading-relaxed">
+                        <ColorCodedText text={s} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-white/70 mb-1.5 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500/80" />
+                  Tradeoffs between departments
+                </p>
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                  <div className="divide-y divide-white/10">
+                    {tradeoffItems.map((s, i) => {
+                      const [headline, detail] = s.split(/:\s+/, 2)
+                      return (
+                        <div key={i} className="px-3 py-2.5 text-sm text-white/85 leading-relaxed space-y-1">
+                          <p className="font-medium">
+                            <ColorCodedText text={headline ?? s} />
+                          </p>
+                          {detail && (
+                            <p className="text-white/80">
+                              <ColorCodedText text={detail} />
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs text-white/50 mb-2">Per-persona breakdown (by specialism)</p>
+            <div className="space-y-5">
+              {decision.scores.map((s) => {
+                const color = getSpecialistColor(s.specialist_id)
+                return (
+                  <div
+                    key={s.specialist_id}
+                    className="rounded-xl bg-surface-700/80 border border-white/10 p-4"
+                    style={{ borderLeft: `4px solid ${color}` }}
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <span
+                        className="text-sm font-semibold text-white"
+                        style={{ color }}
+                      >
+                        {s.specialist_name}
+                      </span>
+                      <span className="text-xs text-white/50">Score (0–100)</span>
+                      <span className="text-sm font-bold text-white">{s.score * 10}/100</span>
+                    </div>
+                    <div className="space-y-2.5 text-xs leading-relaxed">
+                      <div>
+                        <p className="text-white/50 mb-0.5">Score explanation</p>
+                        <p className="text-white/85 leading-relaxed">{s.summary}</p>
+                      </div>
+                      {s.objections.length > 0 && (
+                        <div>
+                          <p className="text-white/50 mb-0.5">Key risks / objections</p>
+                          <ul className="list-disc list-inside text-white/75 space-y-0.5">
+                            {s.objections.map((o, i) => (
+                              <li key={i}>{o}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-white/50 mb-0.5">Trade-offs (from this lens)</p>
+                        <p className="text-white/60 italic">— Reflected in summary and objections above.</p>
+                      </div>
+                      <div>
+                        <p className="text-white/50 mb-0.5">Evidence gaps</p>
+                        <p className="text-white/60">—</p>
+                      </div>
+                      <div>
+                        <p className="text-white/50 mb-0.5">Conditions that could change assessment</p>
+                        <p className="text-white/60">—</p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const SpeechRecognitionAPI =
   typeof window !== 'undefined' &&
@@ -55,7 +339,12 @@ export function ProjectChatTab({
   const [decisionFormDescription, setDecisionFormDescription] = useState('')
   const [decisionFormContext, setDecisionFormContext] = useState('')
   const [decisionLoading, setDecisionLoading] = useState(false)
-  const [decisionResult, setDecisionResult] = useState<DecisionEvaluateResponse | null>(null)
+  const [decisionResultsByMessageId, setDecisionResultsByMessageId] = useState<
+    Record<string, DecisionEvaluateResponse>
+  >({})
+  const [openDecisionMessageId, setOpenDecisionMessageId] = useState<string | null>(null)
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
 
   /** Voice call (DM or group): listen → send → play reply → listen again */
   const [inCall, setInCall] = useState(false)
@@ -70,17 +359,60 @@ export function ProjectChatTab({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const inCallRef = useRef(false)
   const lastAutoPlayedIdRef = useRef<string | null>(null)
+  /** When in a decision call: message count at call start so we only auto-play new replies (listen first). */
+  const messagesLengthAtCallStartRef = useRef(0)
   const sendMessageTextRef = useRef<(text: string) => void>(() => {})
+  const [activeCallDecisionId, setActiveCallDecisionId] = useState<string | null>(null)
+  const [latestDecisionForCall, setLatestDecisionForCall] = useState<ProjectDecisionSummary | null>(null)
+  const [loadingDecisionForCall, setLoadingDecisionForCall] = useState(false)
+  const [decisionForCallError, setDecisionForCallError] = useState<string | null>(null)
+  /** In call popover: who to call (1 or more specialists, or all). Used to start the call; during call this is voiceCallTargetIds. */
+  const [callParticipantIds, setCallParticipantIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     inCallRef.current = inCall
   }, [inCall])
+
+  // Decision call: record message count at call start so we only auto-play new replies (listen first).
+  useEffect(() => {
+    if (inCall && activeCallDecisionId) {
+      messagesLengthAtCallStartRef.current = allMessages.length
+    }
+  }, [inCall, activeCallDecisionId])
+
+  // When call popover opens, init "who to call" from current chat selection (or all if none), and fetch latest decision.
+  useEffect(() => {
+    if (!callPopoverOpen) return
+    const initial =
+      dmSpecialistId
+        ? new Set<string>([dmSpecialistId])
+        : selectedIds.size > 0
+          ? new Set(selectedIds)
+          : new Set(mockSpecialists.map((s) => s.id))
+    setCallParticipantIds(initial)
+  }, [callPopoverOpen, dmSpecialistId, selectedIds])
+
+  // When the call popover is open, fetch the most recent decision so it can be used as call context.
+  useEffect(() => {
+    if (!callPopoverOpen || loadingDecisionForCall || latestDecisionForCall || !projectId) return
+    setLoadingDecisionForCall(true)
+    setDecisionForCallError(null)
+    getProjectDecisions(projectId)
+      .then((list) => {
+        setLatestDecisionForCall(list[0] ?? null)
+      })
+      .catch((err: unknown) => {
+        setDecisionForCallError(err instanceof Error ? err.message : 'Failed to load decisions for call')
+      })
+      .finally(() => setLoadingDecisionForCall(false))
+  }, [callPopoverOpen, loadingDecisionForCall, latestDecisionForCall, projectId])
 
   useEffect(() => {
     if (!callPopoverOpen) return
     const handler = (e: MouseEvent) => {
       if (callPopoverRef.current && !callPopoverRef.current.contains(e.target as Node)) {
         setCallPopoverOpen(false)
+        setLatestDecisionForCall(null)
       }
     }
     document.addEventListener('click', handler)
@@ -94,15 +426,44 @@ export function ProjectChatTab({
   useEffect(() => {
     fetchProjectChat(projectId)
       .then((msgs) => {
-        setMessages(
-          msgs.map((m) => ({
-            id: m.id,
-            sender: m.sender,
-            text: m.text,
-            at: m.at,
-            thinkingProcess: m.thinkingProcess,
-          }))
-        )
+        const threadMessages = msgs.map((m) => ({
+          id: m.id,
+          sender: m.sender,
+          text: m.text,
+          at: m.at,
+          thinkingProcess: m.thinkingProcess,
+          decisionId: m.decisionId,
+        }))
+        setMessages(threadMessages)
+
+        // For any decision bubbles, hydrate their full breakdowns from the backend.
+        // We key results by message id so clicking the bubble (which uses m.id) always works.
+        const messageDecisionPairs = threadMessages
+          .filter((m) => typeof m.decisionId === 'string' && m.decisionId.length > 0)
+          .map((m) => ({ messageId: m.id, decisionId: m.decisionId as string }))
+
+        if (messageDecisionPairs.length > 0) {
+          Promise.all(
+            messageDecisionPairs.map(async ({ messageId, decisionId }) => {
+              try {
+                const d = await getDecision(decisionId)
+                return { messageId, decision: d }
+              } catch {
+                return null
+              }
+            })
+          ).then((results) => {
+            const map: Record<string, DecisionEvaluateResponse> = {}
+            for (const item of results) {
+              if (item && item.messageId) {
+                map[item.messageId] = item.decision
+              }
+            }
+            if (Object.keys(map).length > 0) {
+              setDecisionResultsByMessageId((prev) => ({ ...prev, ...map }))
+            }
+          })
+        }
       })
       .catch(() => setMessages([]))
   }, [projectId])
@@ -235,9 +596,15 @@ export function ProjectChatTab({
       }
       setMessages((prev) => [...prev, userMsg])
       setIsLoading(true)
-      const specialistIds = Array.from(voiceCallTargetIds ?? selectedIds)
+      const mentionIds = extractMentionedSpecialists(text)
+      const specialistIds = (mentionIds.length > 0 ? mentionIds : Array.from(voiceCallTargetIds ?? selectedIds))
       try {
-        const { responses } = await sendChatMessage(projectId, text.trim(), specialistIds)
+        const { responses } = await sendChatMessage(
+          projectId,
+          text.trim(),
+          specialistIds,
+          activeCallDecisionId ?? undefined
+        )
         const now = new Date().toISOString()
         const newMessages: ThreadMessage[] = responses.map((r, i) => ({
           id: `local-spec-${Date.now()}-${i}`,
@@ -260,7 +627,7 @@ export function ProjectChatTab({
         setIsLoading(false)
       }
     },
-    [projectId, selectedIds, voiceCallTargetIds]
+    [projectId, selectedIds, voiceCallTargetIds, activeCallDecisionId]
   )
   sendMessageTextRef.current = sendMessageText
 
@@ -268,6 +635,8 @@ export function ProjectChatTab({
     const text = input.trim()
     if (!text) return
     setInput('')
+    setMentionOpen(false)
+    setMentionQuery('')
     await sendMessageText(text)
   }
 
@@ -297,6 +666,29 @@ export function ProjectChatTab({
     }
   }, [voiceAvailable])
 
+  /** Start a decision call: participants + decision context, then listen first (mic on immediately). */
+  const startDecisionCall = useCallback(
+    (participantIds: Set<string>, decisionId: string) => {
+      if (!voiceAvailable || !SpeechRecognitionAPI || participantIds.size === 0) return
+      setVoiceCallTargetIds(participantIds)
+      setActiveCallDecisionId(decisionId)
+      setInCall(true)
+      setCallPopoverOpen(false)
+      setLatestDecisionForCall(null)
+      lastAutoPlayedIdRef.current = null
+      setSpeakingNow(null)
+      try {
+        recognitionRef.current?.start()
+        setIsListening(true)
+      } catch {
+        setInCall(false)
+        setVoiceCallTargetIds(null)
+        setActiveCallDecisionId(null)
+      }
+    },
+    [voiceAvailable]
+  )
+
   const startCall = useCallback(() => {
     if (dmSpecialistId) {
       startCallWith(new Set([dmSpecialistId]))
@@ -308,9 +700,11 @@ export function ProjectChatTab({
   const endCall = useCallback(() => {
     setInCall(false)
     setVoiceCallTargetIds(null)
+    setActiveCallDecisionId(null)
     setIsListening(false)
     setSpeakingNow(null)
     lastAutoPlayedIdRef.current = null
+    messagesLengthAtCallStartRef.current = 0
     try {
       recognitionRef.current?.abort()
     } catch {}
@@ -351,6 +745,9 @@ export function ProjectChatTab({
     if (last.sender === 'user') return
     if (lastAutoPlayedIdRef.current === last.id) return
 
+    // Decision call: listen first — only auto-play replies that arrived after the user spoke during this call.
+    if (activeCallDecisionId && allMessages.length <= messagesLengthAtCallStartRef.current) return
+
     const isSingleReply = dmSpecialistId || (voiceCallTargetIds?.size === 1)
     if (isSingleReply) {
       lastAutoPlayedIdRef.current = last.id
@@ -371,7 +768,7 @@ export function ProjectChatTab({
     playGroupReplyBatch(batch, () => {
       if (inCallRef.current) restartListening()
     })
-  }, [inCall, dmSpecialistId, voiceCallTargetIds, isLoading, allMessages, playVoice, playGroupReplyBatch, restartListening])
+  }, [inCall, dmSpecialistId, voiceCallTargetIds, activeCallDecisionId, isLoading, allMessages, playVoice, playGroupReplyBatch, restartListening])
 
   const specialistsInChat = mockSpecialists.filter((s) => selectedIds.has(s.id))
 
@@ -422,7 +819,7 @@ export function ProjectChatTab({
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0 relative" ref={callPopoverRef}>
-              {(dmSpecialistId || selectedIds.size > 0) && (
+              {projectId && (
                 inCall ? (
                   <button
                     type="button"
@@ -453,49 +850,99 @@ export function ProjectChatTab({
                               <p>Voice not supported in this browser. Use Chrome or Edge.</p>
                             )}
                           </div>
-                        ) : dmSpecialistId && specialistsInChat[0] ? (
-                          <button
-                            type="button"
-                            onClick={() => startCallWith(new Set([dmSpecialistId!]))}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-white hover:bg-white/10"
-                          >
-                            <div
-                              className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white"
-                              style={{ backgroundColor: specialistsInChat[0].color }}
-                            >
-                              {specialistsInChat[0].name.slice(0, 1)}
-                            </div>
-                            <span>Start call with {specialistsInChat[0].name}</span>
-                          </button>
                         ) : (
-                          <>
-                            {specialistsInChat.map((s) => (
+                          <div className="px-2 py-1 min-w-[240px]">
+                            <p className="px-1 pb-1 text-[11px] uppercase tracking-wide text-white/40">
+                              Who to call
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {mockSpecialists.map((s) => {
+                                const selected = callParticipantIds.has(s.id)
+                                return (
+                                  <button
+                                    key={s.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setCallParticipantIds((prev) => {
+                                        const next = new Set(prev)
+                                        if (next.has(s.id)) next.delete(s.id)
+                                        else next.add(s.id)
+                                        return next
+                                      })
+                                    }}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                                      selected ? 'ring-1 ring-white/30' : 'opacity-80 hover:opacity-100'
+                                    }`}
+                                    style={{
+                                      backgroundColor: selected ? s.color + '40' : 'transparent',
+                                      color: s.color,
+                                    }}
+                                  >
+                                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: s.color }}>
+                                      {s.name.slice(0, 1)}
+                                    </span>
+                                    {s.name}
+                                    {selected && <ion-icon name="checkmark" className="text-sm" />}
+                                  </button>
+                                )
+                              })}
                               <button
-                                key={s.id}
                                 type="button"
-                                onClick={() => startCallWith(new Set([s.id]))}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-white hover:bg-white/10"
+                                onClick={() => {
+                                  const allIds = new Set(mockSpecialists.map((x) => x.id))
+                                  setCallParticipantIds(allIds)
+                                }}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white/80 hover:bg-white/10"
                               >
-                                <div
-                                  className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white"
-                                  style={{ backgroundColor: s.color }}
-                                >
-                                  {s.name.slice(0, 1)}
+                                <ion-icon name="people" />
+                                All
+                              </button>
+                            </div>
+
+                            <div className="mt-2 pt-2 border-t border-white/10">
+                              <p className="px-1 pb-1 text-[11px] uppercase tracking-wide text-white/40">
+                                Decision context
+                              </p>
+                              <p className="px-1 text-[11px] text-white/50 mb-1">
+                                AI will answer only from this decision and project docs.
+                              </p>
+                              {loadingDecisionForCall ? (
+                                <div className="px-3 py-2 text-xs text-white/60">Loading most recent decision…</div>
+                              ) : decisionForCallError ? (
+                                <div className="px-3 py-2 text-xs text-red-300">
+                                  Could not load decisions: {decisionForCallError}
                                 </div>
-                                <span>Start call with {s.name}</span>
-                              </button>
-                            ))}
-                            {specialistsInChat.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => startCallWith(selectedIds)}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-white hover:bg-white/10 border-t border-white/10 mt-1 pt-2"
-                              >
-                                <ion-icon name="people" className="text-lg text-white/70" />
-                                <span>Start group call</span>
-                              </button>
-                            )}
-                          </>
+                              ) : latestDecisionForCall ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (callParticipantIds.size === 0) return
+                                    startDecisionCall(new Set(callParticipantIds), latestDecisionForCall.id)
+                                  }}
+                                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-xs text-white/80"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <ion-icon
+                                      name="git-branch-outline"
+                                      className="text-base text-accent-cyan shrink-0"
+                                    />
+                                    <div className="min-w-0">
+                                      <p className="font-medium truncate">
+                                        Start call — {callParticipantIds.size} specialist{callParticipantIds.size !== 1 ? 's' : ''}
+                                      </p>
+                                      <p className="text-[11px] text-white/50 truncate">
+                                        {latestDecisionForCall.title}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </button>
+                              ) : (
+                                <div className="px-3 py-2 text-xs text-white/50">
+                                  No decisions yet. Run an evaluation first.
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -601,7 +1048,9 @@ export function ProjectChatTab({
             allMessages.map((m) => {
               const isUser = m.sender === 'user'
               const specialist = !isUser ? mockSpecialists.find((s) => s.id === m.sender) : null
-              const hasThinking = !isUser && m.thinkingProcess
+              const decision = decisionResultsByMessageId[m.id]
+              const isDecisionMsg = m.sender === 'decision'
+              const hasThinking = !isUser && m.thinkingProcess && !isDecisionMsg
               const isExpanded = expandedThinkingId === m.id
               return (
                 <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -615,18 +1064,35 @@ export function ProjectChatTab({
                       </div>
                     )}
                     <div className="flex flex-col gap-1">
-                      <button
-                        type="button"
+                      <div
+                        role="button"
                         className={`rounded-2xl px-4 py-2.5 shadow-sm text-left transition-opacity ${
                           isUser
                             ? 'bg-emerald-600/90 text-white rounded-br-md cursor-default'
-                            : hasThinking
-                              ? 'bg-surface-700 text-white/90 border border-white/10 rounded-bl-md hover:border-white/20 cursor-pointer'
-                              : 'bg-surface-700 text-white/90 border border-white/10 rounded-bl-md cursor-default'
+                            : isDecisionMsg
+                              ? 'bg-surface-700 text-white/90 border border-accent-cyan/40 rounded-bl-md hover:border-accent-cyan/70 cursor-pointer'
+                              : hasThinking
+                                ? 'bg-surface-700 text-white/90 border border-white/10 rounded-bl-md hover:border-white/20 cursor-pointer'
+                                : 'bg-surface-700 text-white/90 border border-white/10 rounded-bl-md cursor-default'
                         }`}
-                        onClick={() => hasThinking && setExpandedThinkingId((id) => (id === m.id ? null : m.id))}
+                        onClick={async () => {
+                          if (isDecisionMsg) {
+                            let data = decisionResultsByMessageId[m.id]
+                            if (!data && 'decisionId' in m && m.decisionId) {
+                              try {
+                                data = await getDecision(m.decisionId)
+                                setDecisionResultsByMessageId((prev) => ({ ...prev, [m.id]: data }))
+                              } catch {
+                                return
+                              }
+                            }
+                            if (data) setOpenDecisionMessageId(m.id)
+                          } else if (hasThinking) {
+                            setExpandedThinkingId((id) => (id === m.id ? null : m.id))
+                          }
+                        }}
                       >
-                        {!isUser && specialist && (
+                        {!isUser && specialist && !isDecisionMsg && (
                           <p className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: specialist.color }}>
                             {specialist.name}
                             {hasThinking && (
@@ -637,11 +1103,18 @@ export function ProjectChatTab({
                             )}
                           </p>
                         )}
-                        <p className="text-sm whitespace-pre-wrap break-words">{m.text}</p>
-                                <p className={`text-[10px] mt-1 flex items-center gap-1 justify-end ${isUser ? 'text-emerald-200/70' : 'text-white/40'}`}>
+                        {isDecisionMsg ? (
+                          <p className="flex items-center gap-2 text-sm text-white/90">
+                            <ion-icon name="git-branch-outline" className="text-base text-accent-cyan" />
+                            <span className="truncate">{m.text}</span>
+                          </p>
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap break-words">{m.text}</p>
+                        )}
+                        <p className={`text-[10px] mt-1 flex items-center gap-1 justify-end ${isUser ? 'text-emerald-200/70' : 'text-white/40'}`}>
                           {new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           {isUser && <ion-icon name="checkmark-done" className="text-xs" />}
-                          {!isUser && voiceAvailable && (
+                          {!isUser && specialist && voiceAvailable && !isDecisionMsg && (
                             <button
                               type="button"
                               onClick={() => playVoice(m)}
@@ -657,8 +1130,11 @@ export function ProjectChatTab({
                           {hasThinking && !isExpanded && (
                             <span className="text-white/40">Click to see thinking</span>
                           )}
+                          {isDecisionMsg && (
+                            <span className="text-white/40">Click to see full breakdown</span>
+                          )}
                         </p>
-                      </button>
+                      </div>
                       {hasThinking && isExpanded && (
                         <div className="rounded-xl px-4 py-3 bg-surface-800/90 border border-white/10 text-xs text-white/70 whitespace-pre-wrap">
                           <p className="font-medium text-white/80 mb-2 flex items-center gap-1">
@@ -749,7 +1225,21 @@ export function ProjectChatTab({
                           description: decisionFormDescription.trim(),
                           context: decisionFormContext.trim() || undefined,
                         })
-                        setDecisionResult(res)
+                        const now = new Date().toISOString()
+                        const decisionMsgId = `decision-${Date.now()}`
+                        setMessages((prev) => [
+                          ...prev,
+                          {
+                            id: decisionMsgId,
+                            sender: 'decision',
+                            text: res.decision_title,
+                            at: now,
+                          },
+                        ])
+                        setDecisionResultsByMessageId((prev) => ({
+                          ...prev,
+                          [decisionMsgId]: res,
+                        }))
                         setPlusOpen(false)
                         setPlusStep('choice')
                         setDecisionFormTitle('')
@@ -887,14 +1377,79 @@ export function ProjectChatTab({
             >
               <ion-icon name="add-circle-outline" className="text-2xl" />
             </button>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder="Message"
-              className="flex-1 rounded-full px-4 py-2.5 bg-surface-700 border border-white/10 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-            />
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setInput(val)
+                  const beforeCursor = val.slice(0, e.target.selectionStart ?? val.length)
+                  const match = beforeCursor.match(/@([\w]*)$/)
+                  if (match) {
+                    setMentionOpen(true)
+                    setMentionQuery(match[1].toLowerCase())
+                  } else {
+                    setMentionOpen(false)
+                    setMentionQuery('')
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSend()
+                    return
+                  }
+                }}
+                placeholder="Message"
+                className="w-full rounded-full px-4 py-2.5 bg-surface-700 border border-white/10 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+              />
+              {mentionOpen && (
+                <div className="absolute left-0 bottom-full mb-1 w-56 rounded-xl bg-surface-800 border border-white/10 shadow-xl z-10">
+                  <ul className="max-h-56 overflow-y-auto py-1">
+                    {mockSpecialists
+                      .filter((s) => {
+                        if (!mentionQuery) return true
+                        return (
+                          s.name.toLowerCase().includes(mentionQuery) ||
+                          s.id.toLowerCase().includes(mentionQuery)
+                        )
+                      })
+                      .map((s) => (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-white hover:bg-white/10"
+                            onClick={() => {
+                              const val = input
+                              const match = val.match(/@[\w]*$/)
+                              const handle = `@${s.id}`
+                              const next =
+                                match && match.index !== undefined
+                                  ? val.slice(0, match.index) + handle + ' ' + val.slice(match.index + match[0].length)
+                                  : val + handle + ' '
+                              setInput(next)
+                              setMentionOpen(false)
+                              setMentionQuery('')
+                            }}
+                          >
+                            <span
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                              style={{ backgroundColor: s.color }}
+                            >
+                              {s.name.slice(0, 1)}
+                            </span>
+                            <span className="flex-1 truncate">
+                              <span className="text-white/90 mr-1">{s.name}</span>
+                              <span className="text-white/40">@{s.id}</span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={handleSend}
@@ -906,6 +1461,12 @@ export function ProjectChatTab({
             </button>
           </div>
         </div>
+        {openDecisionMessageId && decisionResultsByMessageId[openDecisionMessageId] ? (
+          <DecisionBreakdownModal
+            decision={decisionResultsByMessageId[openDecisionMessageId]}
+            onClose={() => setOpenDecisionMessageId(null)}
+          />
+        ) : null}
       </div>
 
       {/* Right: Group details + Specialists in chat */}
@@ -925,55 +1486,6 @@ export function ProjectChatTab({
             <p className="text-sm text-white/60 line-clamp-2">{projectDescription}</p>
           )}
         </div>
-
-        {/* Decision scoring (when + → Evaluate a decision has been used) */}
-        {decisionResult && (
-          <div className="p-3 border-b border-white/10">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-white/70">Decision scoring</span>
-              <button
-                type="button"
-                onClick={() => setDecisionResult(null)}
-                className="text-xs text-white/50 hover:text-white/80"
-              >
-                Dismiss
-              </button>
-            </div>
-            <p className="font-medium text-white text-sm mb-3 truncate" title={decisionResult.decision_title}>
-              {decisionResult.decision_title}
-            </p>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {decisionResult.scores.map((s) => {
-                const spec = mockSpecialists.find((m) => m.id === s.specialist_id)
-                const color = spec?.color ?? '#6b7280'
-                return (
-                  <div
-                    key={s.specialist_id}
-                    className="rounded-lg bg-surface-700/80 border border-white/10 p-2"
-                    style={{ borderLeftWidth: 3, borderLeftColor: color }}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <span className="text-xs font-medium text-white/90">{s.specialist_name}</span>
-                      <span className="text-xs font-bold text-white/90">{s.score}/10</span>
-                    </div>
-                    <p className="text-[11px] text-white/70 line-clamp-2">{s.summary}</p>
-                    {s.objections.length > 0 && (
-                      <ul className="mt-1 text-[10px] text-white/50 list-disc list-inside">
-                        {s.objections.slice(0, 2).map((o, i) => (
-                          <li key={i}>{o}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            <div className="mt-3 space-y-1.5 text-[11px]">
-              <p><span className="text-white/50">Agreement:</span> <span className="text-white/80">{decisionResult.agreement}</span></p>
-              <p><span className="text-white/50">Tradeoffs:</span> <span className="text-white/80">{decisionResult.tradeoffs}</span></p>
-            </div>
-          </div>
-        )}
 
         {/* Specialists in this chat (or DM info) */}
         <div className="flex-1 overflow-y-auto p-3">

@@ -16,6 +16,7 @@ class SpecialistScore(BaseModel):
 
 
 class DecisionEvaluateResponse(BaseModel):
+    decision_id: str | None = None
     decision_title: str
     scores: list[SpecialistScore]
     agreement: str
