@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { mockSpecialists, mockSpecialistHappiness } from '../data/mock'
-import { getProjectDecisions, type ProjectDecisionSummary } from '../api/decision'
+import { getProjectDecisions, getDecision, type ProjectDecisionSummary } from '../api/decision'
+import type { DecisionEvaluateResponse } from '../api/decision'
+import { DecisionBreakdownModal } from './DecisionBreakdownModal'
 
 export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }) {
   const [decisions, setDecisions] = useState<ProjectDecisionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [breakdownDecision, setBreakdownDecision] = useState<DecisionEvaluateResponse | null>(null)
+  const [breakdownLoadingId, setBreakdownLoadingId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -27,6 +31,14 @@ export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }
       cancelled = true
     }
   }, [projectId])
+
+  const openBreakdown = (decisionId: string) => {
+    setBreakdownLoadingId(decisionId)
+    getDecision(decisionId)
+      .then((data) => setBreakdownDecision(data))
+      .catch(() => setBreakdownDecision(null))
+      .finally(() => setBreakdownLoadingId(null))
+  }
 
   const happiness = mockSpecialistHappiness[projectId] ?? {}
 
@@ -64,15 +76,31 @@ export function ProjectDecisionHappinessTab({ projectId }: { projectId: string }
                 key={d.id}
                 className="flex items-center justify-between gap-4 p-4 rounded-xl bg-surface-800 border border-white/10"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-white font-medium">{d.title}</p>
                   <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{d.summary}</p>
                 </div>
-                <span className="px-2 py-0.5 rounded text-xs bg-white/10 shrink-0">{d.status}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-2 py-0.5 rounded text-xs bg-white/10">{d.status}</span>
+                  <button
+                    type="button"
+                    onClick={() => openBreakdown(d.id)}
+                    disabled={breakdownLoadingId !== null}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600/80 text-white text-xs font-medium hover:bg-emerald-500/80 disabled:opacity-50"
+                  >
+                    {breakdownLoadingId === d.id ? 'Loading…' : 'View breakdown'}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
+      {breakdownDecision && (
+        <DecisionBreakdownModal
+          decision={breakdownDecision}
+          onClose={() => setBreakdownDecision(null)}
+        />
+      )}
       </div>
 
       {/* AI happiness */}

@@ -8,12 +8,29 @@ export interface SpecialistScore {
   objections: string[]
 }
 
+export interface DimensionScoreDetail {
+  Name: string
+  Score: number
+  KeyRisks: string[]
+  TradeOffs: string[]
+  EvidenceGaps: string[]
+}
+
+export interface DecisionPersonaScoreDetail {
+  persona_name: string
+  total_score: number
+  dimensions: DimensionScoreDetail[]
+  what_would_change_my_mind: string[]
+  high_structural_risk: boolean
+}
+
 export interface DecisionEvaluateResponse {
   decision_id?: string | null
   decision_title: string
   scores: SpecialistScore[]
   agreement: string
   tradeoffs: string
+  persona_scores?: DecisionPersonaScoreDetail[]
 }
 
 export interface StoredDecisionResponse extends DecisionEvaluateResponse {
@@ -21,10 +38,17 @@ export interface StoredDecisionResponse extends DecisionEvaluateResponse {
   decision_id: string
 }
 
+export interface InlineDocumentInput {
+  content: string
+  label?: string | null
+}
+
 export interface DecisionEvaluateInput {
   title: string
   description: string
   context?: string | null
+  document_ids?: string[] | null
+  inline_documents?: InlineDocumentInput[] | null
 }
 
 export async function evaluateDecision(
@@ -41,6 +65,8 @@ export async function evaluateDecision(
       title: input.title,
       description: input.description,
       context: input.context ?? null,
+      document_ids: input.document_ids?.length ? input.document_ids : null,
+      inline_documents: input.inline_documents?.length ? input.inline_documents : null,
     }),
   })
   if (!res.ok) {

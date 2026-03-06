@@ -23,7 +23,7 @@ def get_context_for_project(project_id: str) -> list[dict]:
                 "project_id": str(r.get("project_id", "")),
                 "type": r.get("type", "document"),
                 "label": r.get("label"),
-                "content": r.get("content", ""),
+                "content": r.get("content") or "",
                 "permitted_specialists": r.get("permitted_specialists", "all"),
             }
             for r in rows

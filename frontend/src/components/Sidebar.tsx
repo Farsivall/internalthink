@@ -38,9 +38,18 @@ export function Sidebar({ open }: { open: boolean }) {
           <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">Draft</button>
         </div>
         <div className="pt-4 mt-4 border-t border-white/10">
-          <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">Persona Library</button>
-          <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">Reports</button>
-          <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">Settings</button>
+          <Link
+            to="/personas"
+            className="block w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5"
+          >
+            Persona Library
+          </Link>
+          <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">
+            Reports
+          </button>
+          <button type="button" className="w-full px-3 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/5">
+            Settings
+          </button>
         </div>
       </nav>
     </aside>

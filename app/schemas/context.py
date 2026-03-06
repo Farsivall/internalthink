@@ -44,9 +44,18 @@ class ContextSourceResponse(BaseModel):
     project_id: UUID
     type: ContextSourceType
     label: Optional[str] = None
-    content: str
+    content: Optional[str] = None
     permitted_specialists: Optional[PermittedSpecialists] = "all"
     created_at: datetime
+    # Drive-style file metadata (optional)
+    storage_path: Optional[str] = None
+    file_name: Optional[str] = None
+    folder_path: Optional[str] = None
+    folder_id: Optional[UUID] = None
+    uploaded_by: Optional[UUID] = None
+    version: Optional[int] = None
+    size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
 
     @field_validator("permitted_specialists", mode="before")
     @classmethod
@@ -54,3 +63,38 @@ class ContextSourceResponse(BaseModel):
         return _normalize_permitted_specialists(v)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FileRenameRequest(BaseModel):
+    title: Optional[str] = None
+    file_name: Optional[str] = None
+
+
+class FileMoveRequest(BaseModel):
+    folder_path: Optional[str] = None
+    folder_id: Optional[UUID] = None
+
+
+# --- Folders (Drive-style) ---
+
+class FolderResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    name: str
+    parent_id: Optional[UUID] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FolderCreate(BaseModel):
+    project_id: UUID
+    name: str
+    parent_id: Optional[UUID] = None
+
+
+class FolderRenameRequest(BaseModel):
+    name: str
+
+
+class FolderMoveRequest(BaseModel):
+    parent_id: Optional[UUID] = None

@@ -2,6 +2,13 @@ from io import BytesIO
 from pypdf import PdfReader
 
 
+def strip_null_bytes(s: str) -> str:
+    """Remove null bytes so text can be stored in PostgreSQL (text type disallows \\u0000)."""
+    if not isinstance(s, str):
+        return s
+    return s.replace("\x00", "")
+
+
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF file.
 
@@ -30,8 +37,9 @@ def truncate_to_word_limit(text: str, max_words: int = 3000) -> str:
     """Truncate text to a maximum word count.
 
     If the text exceeds the limit, keeps the first max_words words
-    and appends a truncation note.
+    and appends a truncation note. Also strips null bytes for DB compatibility.
     """
+    text = strip_null_bytes(text)
     words = text.split()
     if len(words) <= max_words:
         return text

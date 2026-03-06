@@ -6,6 +6,12 @@ import { getProjectChat as fetchProjectChat } from '../api/chatMessages'
 import { isVoiceAvailable, getVoiceAudio } from '../api/voice'
 import { evaluateDecision, getDecision, getProjectDecisions } from '../api/decision'
 import type { DecisionEvaluateResponse, ProjectDecisionSummary } from '../api/decision'
+import { uploadDocument, addDocumentText, extractDocumentText } from '../api/context'
+import { DecisionBreakdownModal } from './DecisionBreakdownModal'
+
+type DecisionFormAttachment =
+  | { id: string; type: 'file'; file: File; label: string; saveToProject: boolean }
+  | { id: string; type: 'paste'; pastedContent: string; label: string; saveToProject: boolean }
 
 const mentionMap: Record<string, string> = {
   '@legal': 'legal',
@@ -29,266 +35,6 @@ function extractMentionedSpecialists(text: string): string[] {
 function getSpecialistColor(id: string): string {
   const spec = mockSpecialists.find((s) => s.id === id)
   return spec?.color ?? '#6b7280'
-}
-
-function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-  const rad = ((angleDeg - 90) * Math.PI) / 180
-  return {
-    x: cx + r * Math.cos(rad),
-    y: cy + r * Math.sin(rad),
-  }
-}
-
-function DecisionPieChart({ decision }: { decision: DecisionEvaluateResponse }) {
-  const total = decision.scores.reduce((sum, s) => sum + Math.max(s.score * 10, 0), 0) || 1
-  const cx = 60
-  const cy = 60
-  const r = 48
-  let cumulative = 0
-
-  const segmentData = decision.scores.map((s) => {
-    const value = Math.max(s.score * 10, 0)
-    const startAngle = (cumulative / total) * 360
-    const endAngle = ((cumulative + value) / total) * 360
-    cumulative += value
-    const midAngle = (startAngle + endAngle) / 2
-    const labelPos = polarToCartesian(cx, cy, r * 0.55, midAngle)
-    return {
-      ...s,
-      startAngle,
-      endAngle,
-      value,
-      labelPos,
-      color: getSpecialistColor(s.specialist_id),
-    }
-  })
-
-  const segments = segmentData.map((s) => {
-    const largeArc = s.endAngle - s.startAngle > 180 ? 1 : 0
-    const start = polarToCartesian(cx, cy, r, s.endAngle)
-    const end = polarToCartesian(cx, cy, r, s.startAngle)
-    const d = [
-      `M ${cx} ${cy}`,
-      `L ${start.x} ${start.y}`,
-      `A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`,
-      'Z',
-    ].join(' ')
-    return (
-      <g key={s.specialist_id}>
-        <path d={d} fill={s.color} stroke="rgba(0,0,0,0.2)" strokeWidth={1} />
-        <text
-          x={s.labelPos.x}
-          y={s.labelPos.y}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          className="fill-white text-[10px] font-bold"
-          style={{ textShadow: '0 0 2px rgba(0,0,0,0.8)' }}
-        >
-          {s.score * 10}
-        </text>
-      </g>
-    )
-  })
-
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <svg viewBox="0 0 120 120" className="w-36 h-36 shrink-0">
-        <g>{segments}</g>
-      </svg>
-      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1.5 text-[11px]">
-        {segmentData.map((s) => (
-          <span key={s.specialist_id} className="flex items-center gap-1">
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: s.color }}
-            />
-            <span className="text-white/90">{s.specialist_name}</span>
-            <span className="text-white/60">({s.score * 10})</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/** Wrap specialist names in the text with colour-coded spans */
-function ColorCodedText({ text }: { text: string }) {
-  const names = mockSpecialists.map((s) => s.name)
-  const parts: { str: string; color?: string }[] = []
-  let remaining = text
-  while (remaining.length > 0) {
-    let best: { name: string; index: number } | null = null
-    for (const name of names) {
-      const i = remaining.indexOf(name)
-      if (i !== -1 && (best === null || i < best.index)) best = { name, index: i }
-    }
-    if (best === null) {
-      parts.push({ str: remaining })
-      break
-    }
-    if (best.index > 0) parts.push({ str: remaining.slice(0, best.index) })
-    const spec = mockSpecialists.find((s) => s.name === best!.name)
-    const color = spec ? getSpecialistColor(spec.id) : undefined
-    parts.push({ str: best.name, color })
-    remaining = remaining.slice(best.index + best.name.length)
-  }
-  return (
-    <span>
-      {parts.map((p, i) =>
-        p.color ? (
-          <span key={i} className="font-medium" style={{ color: p.color }}>
-            {p.str}
-          </span>
-        ) : (
-          <span key={i}>{p.str}</span>
-        )
-      )}
-    </span>
-  )
-}
-
-function DecisionBreakdownModal({
-  decision,
-  onClose,
-}: {
-  decision: DecisionEvaluateResponse
-  onClose: () => void
-}) {
-  const agreementItems = decision.agreement
-    .split(/[\.\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  const tradeoffItems = decision.tradeoffs
-    .split(/[\.\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h3 className="text-sm font-semibold text-white">Decision breakdown</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-white/10 text-white/70"
-          >
-            <ion-icon name="close" className="text-lg" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          <div>
-            <p className="text-xs text-white/50 mb-1">Decision</p>
-            <p className="text-sm font-medium text-white">{decision.decision_title}</p>
-          </div>
-
-          <div className="space-y-5">
-            <div className="flex justify-center">
-              <DecisionPieChart decision={decision} />
-            </div>
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-medium text-white/70 mb-1.5 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500/80" />
-                  What they agree on
-                </p>
-                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
-                  <div className="divide-y divide-white/10">
-                    {agreementItems.map((s, i) => (
-                      <div key={i} className="px-3 py-2.5 text-sm text-white/85 leading-relaxed">
-                        <ColorCodedText text={s} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-white/70 mb-1.5 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-amber-500/80" />
-                  Tradeoffs between departments
-                </p>
-                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
-                  <div className="divide-y divide-white/10">
-                    {tradeoffItems.map((s, i) => {
-                      const [headline, detail] = s.split(/:\s+/, 2)
-                      return (
-                        <div key={i} className="px-3 py-2.5 text-sm text-white/85 leading-relaxed space-y-1">
-                          <p className="font-medium">
-                            <ColorCodedText text={headline ?? s} />
-                          </p>
-                          {detail && (
-                            <p className="text-white/80">
-                              <ColorCodedText text={detail} />
-                            </p>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs text-white/50 mb-2">Per-persona breakdown (by specialism)</p>
-            <div className="space-y-5">
-              {decision.scores.map((s) => {
-                const color = getSpecialistColor(s.specialist_id)
-                return (
-                  <div
-                    key={s.specialist_id}
-                    className="rounded-xl bg-surface-700/80 border border-white/10 p-4"
-                    style={{ borderLeft: `4px solid ${color}` }}
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <span
-                        className="text-sm font-semibold text-white"
-                        style={{ color }}
-                      >
-                        {s.specialist_name}
-                      </span>
-                      <span className="text-xs text-white/50">Score (0–100)</span>
-                      <span className="text-sm font-bold text-white">{s.score * 10}/100</span>
-                    </div>
-                    <div className="space-y-2.5 text-xs leading-relaxed">
-                      <div>
-                        <p className="text-white/50 mb-0.5">Score explanation</p>
-                        <p className="text-white/85 leading-relaxed">{s.summary}</p>
-                      </div>
-                      {s.objections.length > 0 && (
-                        <div>
-                          <p className="text-white/50 mb-0.5">Key risks / objections</p>
-                          <ul className="list-disc list-inside text-white/75 space-y-0.5">
-                            {s.objections.map((o, i) => (
-                              <li key={i}>{o}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-white/50 mb-0.5">Trade-offs (from this lens)</p>
-                        <p className="text-white/60 italic">— Reflected in summary and objections above.</p>
-                      </div>
-                      <div>
-                        <p className="text-white/50 mb-0.5">Evidence gaps</p>
-                        <p className="text-white/60">—</p>
-                      </div>
-                      <div>
-                        <p className="text-white/50 mb-0.5">Conditions that could change assessment</p>
-                        <p className="text-white/60">—</p>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 const SpeechRecognitionAPI =
@@ -338,6 +84,12 @@ export function ProjectChatTab({
   const [decisionFormTitle, setDecisionFormTitle] = useState('')
   const [decisionFormDescription, setDecisionFormDescription] = useState('')
   const [decisionFormContext, setDecisionFormContext] = useState('')
+  /** Attachments: new files or pasted text; each can be ticked "Save to project" to persist and run RAG. */
+  const [decisionFormAttachedList, setDecisionFormAttachedList] = useState<DecisionFormAttachment[]>([])
+  const [decisionFormUploadError, setDecisionFormUploadError] = useState<string | null>(null)
+  const [decisionFormDragOver, setDecisionFormDragOver] = useState(false)
+  const [decisionFormPasteOpen, setDecisionFormPasteOpen] = useState(false)
+  const decisionFormFileInputRef = useRef<HTMLInputElement>(null)
   const [decisionLoading, setDecisionLoading] = useState(false)
   const [decisionResultsByMessageId, setDecisionResultsByMessageId] = useState<
     Record<string, DecisionEvaluateResponse>
@@ -368,6 +120,32 @@ export function ProjectChatTab({
   const [decisionForCallError, setDecisionForCallError] = useState<string | null>(null)
   /** In call popover: who to call (1 or more specialists, or all). Used to start the call; during call this is voiceCallTargetIds. */
   const [callParticipantIds, setCallParticipantIds] = useState<Set<string>>(new Set())
+
+  // Persist selected specialists per project so that when the user returns to this chat,
+  // the same set of specialists are active in the group chat.
+  useEffect(() => {
+    try {
+      const key = `projectChat.selectedSpecialists.${projectId}`
+      const raw = window.localStorage.getItem(key)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setSelectedIds(new Set(parsed.filter((id): id is string => typeof id === 'string')))
+      }
+    } catch {
+      // ignore localStorage/JSON errors and fall back to defaults
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    try {
+      const key = `projectChat.selectedSpecialists.${projectId}`
+      const ids = Array.from(selectedIds)
+      window.localStorage.setItem(key, JSON.stringify(ids))
+    } catch {
+      // ignore persistence errors
+    }
+  }, [projectId, selectedIds])
 
   useEffect(() => {
     inCallRef.current = inCall
@@ -1178,7 +956,14 @@ export function ProjectChatTab({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => { setPlusOpen(false); setPlusStep('choice'); setPlusSelectedSpecialist(null) }}
+                  onClick={() => {
+                    setPlusOpen(false)
+                    setPlusStep('choice')
+                    setPlusSelectedSpecialist(null)
+                    setDecisionFormAttachedList([])
+                    setDecisionFormPasteOpen(false)
+                    setDecisionFormUploadError(null)
+                  }}
                   className="p-2 rounded-full hover:bg-white/10 text-white/70"
                 >
                   <ion-icon name="close" className="text-xl" />
@@ -1219,11 +1004,50 @@ export function ProjectChatTab({
                       e.preventDefault()
                       if (!decisionFormTitle.trim() || !decisionFormDescription.trim()) return
                       setDecisionLoading(true)
+                      setDecisionFormUploadError(null)
                       try {
+                        const documentIds: string[] = []
+                        const inlineDocuments: { content: string; label?: string | null }[] = []
+                        for (const att of decisionFormAttachedList) {
+                          if (att.saveToProject) {
+                            if (att.type === 'file') {
+                              const created = await uploadDocument(
+                                projectId,
+                                att.file,
+                                att.label || att.file.name,
+                                'all',
+                                null
+                              )
+                              documentIds.push(created.id)
+                            } else {
+                              const created = await addDocumentText(
+                                projectId,
+                                att.pastedContent,
+                                att.label || 'Pasted text',
+                                'all'
+                              )
+                              documentIds.push(created.id)
+                            }
+                          } else {
+                            if (att.type === 'file') {
+                              const { content, label } = await extractDocumentText(att.file)
+                              inlineDocuments.push({ content, label: label || att.file.name })
+                            } else {
+                              if (att.pastedContent.trim())
+                                inlineDocuments.push({
+                                  content: att.pastedContent,
+                                  label: att.label || 'Pasted text',
+                                })
+                            }
+                          }
+                        }
                         const res = await evaluateDecision(projectId, {
                           title: decisionFormTitle.trim(),
                           description: decisionFormDescription.trim(),
                           context: decisionFormContext.trim() || undefined,
+                          document_ids: documentIds.length > 0 ? documentIds : undefined,
+                          inline_documents:
+                            inlineDocuments.length > 0 ? inlineDocuments : undefined,
                         })
                         const now = new Date().toISOString()
                         const decisionMsgId = `decision-${Date.now()}`
@@ -1245,8 +1069,12 @@ export function ProjectChatTab({
                         setDecisionFormTitle('')
                         setDecisionFormDescription('')
                         setDecisionFormContext('')
+                        setDecisionFormAttachedList([])
+                        setDecisionFormPasteOpen(false)
+                        setDecisionFormUploadError(null)
                       } catch (err) {
                         console.error(err)
+                        setDecisionFormUploadError(err instanceof Error ? err.message : 'Something went wrong')
                       } finally {
                         setDecisionLoading(false)
                       }
@@ -1285,10 +1113,169 @@ export function ProjectChatTab({
                         className="w-full rounded-lg px-3 py-2 bg-surface-700 border border-white/10 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-none"
                       />
                     </div>
+                    <div>
+                      <label className="block text-xs font-medium text-white/60 mb-1.5">Attach documents (optional)</label>
+                      <p className="text-xs text-white/50 mb-2">Drag files, choose files, or paste text. Tick &quot;Save to project&quot; to store in the project and run through RAG for future decisions.</p>
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); setDecisionFormDragOver(true) }}
+                        onDragLeave={() => setDecisionFormDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          setDecisionFormDragOver(false)
+                          const files = Array.from(e.dataTransfer.files)
+                          if (!files.length) return
+                          setDecisionFormAttachedList((prev) => [
+                            ...prev,
+                            ...files.map((file) => ({
+                              id: crypto.randomUUID(),
+                              type: 'file' as const,
+                              file,
+                              label: file.name,
+                              saveToProject: false,
+                            })),
+                          ])
+                        }}
+                        className={`rounded-xl border-2 border-dashed p-4 text-center transition-colors ${decisionFormDragOver ? 'border-amber-500/60 bg-amber-500/10' : 'border-white/20 bg-surface-700/50'}`}
+                      >
+                        <input
+                          ref={decisionFormFileInputRef}
+                          type="file"
+                          multiple
+                          accept=".pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          className="hidden"
+                          onChange={(e) => {
+                            const files = e.target.files ? Array.from(e.target.files) : []
+                            e.target.value = ''
+                            if (!files.length) return
+                            setDecisionFormAttachedList((prev) => [
+                              ...prev,
+                              ...files.map((file) => ({
+                                id: crypto.randomUUID(),
+                                type: 'file' as const,
+                                file,
+                                label: file.name,
+                                saveToProject: false,
+                              })),
+                            ])
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => decisionFormFileInputRef.current?.click()}
+                          className="text-sm text-amber-400 hover:text-amber-300 font-medium"
+                        >
+                          <ion-icon name="document-attach-outline" className="align-middle mr-1" />
+                          Choose files
+                        </button>
+                        <span className="text-white/50 mx-2">or</span>
+                        <button
+                          type="button"
+                          onClick={() => setDecisionFormPasteOpen(true)}
+                          className="text-sm text-amber-400 hover:text-amber-300 font-medium"
+                        >
+                          Paste text
+                        </button>
+                      </div>
+                      {decisionFormPasteOpen && (
+                        <div className="mt-2 rounded-lg border border-white/10 bg-surface-700/80 p-3 space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Label (e.g. Proposal summary)"
+                            className="w-full rounded px-2 py-1.5 bg-surface-700 border border-white/10 text-sm text-white placeholder:text-white/40"
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
+                            id="paste-label"
+                          />
+                          <textarea
+                            placeholder="Paste content here..."
+                            rows={3}
+                            className="w-full rounded px-2 py-1.5 bg-surface-700 border border-white/10 text-sm text-white placeholder:text-white/40 resize-none"
+                            id="paste-content"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const content = (document.getElementById('paste-content') as HTMLTextAreaElement | null)?.value?.trim()
+                                const label = (document.getElementById('paste-label') as HTMLInputElement | null)?.value?.trim()
+                                if (content) {
+                                  setDecisionFormAttachedList((prev) => [
+                                    ...prev,
+                                    { id: crypto.randomUUID(), type: 'paste', pastedContent: content, label: label || 'Pasted text', saveToProject: false },
+                                  ])
+                                  setDecisionFormPasteOpen(false)
+                                  const ta = document.getElementById('paste-content') as HTMLTextAreaElement | null
+                                  const la = document.getElementById('paste-label') as HTMLInputElement | null
+                                  if (ta) ta.value = ''
+                                  if (la) la.value = ''
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-sm hover:bg-amber-500"
+                            >
+                              Add
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDecisionFormPasteOpen(false)}
+                              className="px-3 py-1.5 rounded-lg border border-white/20 text-white/80 text-sm hover:bg-white/10"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {decisionFormUploadError && (
+                        <p className="mt-1.5 text-sm text-red-400">{decisionFormUploadError}</p>
+                      )}
+                      {decisionFormAttachedList.length > 0 && (
+                        <ul className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-surface-700/80 divide-y divide-white/10">
+                          {decisionFormAttachedList.map((att) => (
+                            <li key={att.id} className="flex items-center gap-2 px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={att.saveToProject}
+                                onChange={() => {
+                                  setDecisionFormAttachedList((prev) =>
+                                    prev.map((a) =>
+                                      a.id === att.id ? { ...a, saveToProject: !a.saveToProject } : a
+                                    )
+                                  )
+                                }}
+                                title="Save to project (store in DB and run RAG pipeline)"
+                                className="rounded border-white/30 text-emerald-500 focus:ring-emerald-500/50"
+                              />
+                              <span className="text-xs text-white/50 shrink-0" title="Save to project">
+                                Save
+                              </span>
+                              <span className="text-sm text-white/90 truncate flex-1">
+                                {att.type === 'file' ? att.file.name : att.label}
+                              </span>
+                              <span className="text-xs text-white/50 shrink-0">
+                                {att.type === 'file' ? 'file' : 'paste'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDecisionFormAttachedList((prev) => prev.filter((a) => a.id !== att.id))
+                                }
+                                className="p-1 rounded hover:bg-white/10 text-white/60 hover:text-white"
+                                title="Remove"
+                              >
+                                <ion-icon name="close-circle" className="text-lg" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                     <div className="flex gap-2 pt-2">
                       <button
                         type="button"
-                        onClick={() => { setPlusStep('choice') }}
+                        onClick={() => {
+                          setPlusStep('choice')
+                          setDecisionFormAttachedList([])
+                          setDecisionFormPasteOpen(false)
+                          setDecisionFormUploadError(null)
+                        }}
                         className="flex-1 px-4 py-2.5 rounded-xl border border-white/20 text-white/80 hover:bg-white/10"
                       >
                         Back

@@ -137,7 +137,14 @@ def get_system_prompt(specialist_id: str) -> str:
 def filter_context_for_specialist(
     specialist_id: str,
     sources: list[dict],
+    *,
+    as_proposal_context: bool = False,
 ) -> str:
+    """
+    Build context string for a specialist from sources.
+    If as_proposal_context is True, documents are presented as attached proposal(s)
+    so the model is prompted to use them in full and reference specific parts.
+    """
     allowed_types = set(PERMISSIONS.get(specialist_id, []))
     parts: list[str] = []
     for src in sources:
@@ -153,7 +160,10 @@ def filter_context_for_specialist(
         label = src.get("label", src_type)
         content = src.get("content", "")
         if content:
-            parts.append(f"--- {label} ---\n{content}")
+            if as_proposal_context:
+                parts.append(f"--- Proposal / document: {label} ---\n{content}")
+            else:
+                parts.append(f"--- {label} ---\n{content}")
     if not parts:
         return "(No context available for this specialist.)"
     return "\n\n".join(parts)

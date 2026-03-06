@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api.routers import health, projects, context, chat, chat_messages, voice, decision
+from app.api.routers import health, projects, context, chat, chat_messages, voice, decision, personas
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="InternalThink / Loaf API")
@@ -50,3 +50,4 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(chat_messages.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 app.include_router(decision.router, prefix="/api/projects")
+app.include_router(personas.router, prefix="/api")

@@ -15,6 +15,8 @@ Loaf is an AI-powered decision consulting platform. Users create projects, attac
 - All five specialist calls must run in parallel, not sequentially
 - The frontend is Next.js and will call this backend over REST — CORS must be configured for `localhost:3000`
 
+**Evaluate Decision — attaching documents:** When the user presses "+" and evaluates a decision, they should be able to **add documents** (e.g. from a proposal: pitch decks, slide decks, PDFs) to support that evaluation. The full behaviour for this flow—attaching proposal/docs to a decision, persona-aware feedback and scores, saving AI evaluations as documents, RAG ingestion—is specified in **`prompt_files/proposaleval.md`**. Implement the "evaluate decision with attached documents" behaviour according to that spec.
+
 ---
 
 ## Section 1 — Project Setup
