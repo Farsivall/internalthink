@@ -19,6 +19,7 @@ from app.schemas.decision import (
 from app.engine.decision import (
     evaluate_specialist,
     synthesize_agreement_and_tradeoffs,
+    synthesize_decision_tree,
 )
 from app.personas import SPECIALISTS
 from app.personas.definitions import filter_context_for_specialist
@@ -26,6 +27,7 @@ from app.services.context import get_context_for_project
 from app.services.persona import (
     get_dimensions_grouped_by_persona,
     SPECIALIST_ID_TO_PERSONA_NAME,
+    PERSONA_NAME_TO_SPECIALIST_ID,
 )
 from app.api.deps import require_supabase
 from app.db.project_resolve import resolve_project_uuid
@@ -65,6 +67,10 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 "content": content,
                 "permitted_specialists": "all",
             })
+    attached_labels = [
+        (str(s.get("label") or s.get("file_name") or "Document")).strip() or "Document"
+        for s in sources
+    ]
     specialist_ids = list(SPECIALISTS.keys())
 
     # Load scoring matrix from Supabase (persona_dimensions) for each persona
@@ -138,33 +144,77 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
     agreement, tradeoffs = synthesize_agreement_and_tradeoffs(title, outputs_for_synthesis)
 
     decision_id: str | None = None
+    synthesis_result: dict | None = None
+
+    # Response persona_scores from persona_details (always available for response)
+    response_persona_scores: list[DecisionPersonaScoreDetail] = []
+    for pname, detail in persona_details:
+        dims = detail.get("dimensions") or []
+        response_persona_scores.append(
+            DecisionPersonaScoreDetail(
+                persona_name=pname,
+                total_score=int(detail.get("total_score", 50)),
+                dimensions=[
+                    DimensionScoreDetail(
+                        Name=str(d.get("Name") or d.get("name") or ""),
+                        Score=int(d.get("Score") or d.get("score") or 0),
+                        KeyRisks=list(d.get("KeyRisks") or d.get("key_risks") or []),
+                        TradeOffs=list(d.get("TradeOffs") or d.get("trade_offs") or []),
+                        EvidenceGaps=list(d.get("EvidenceGaps") or d.get("evidence_gaps") or []),
+                    )
+                    for d in dims if isinstance(d, dict)
+                ],
+                what_would_change_my_mind=list(detail.get("what_would_change_my_mind") or []),
+                high_structural_risk=bool(detail.get("high_structural_risk", False)),
+            )
+        )
+
+    # Build specialist_responses from decision_persona_scores (persona_details) so DB stays in sync
+    persona_details_by_name = {pname: detail for pname, detail in persona_details}
+    specialist_responses_payload = []
+    for i, sid in enumerate(specialist_ids):
+        persona_name = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, SPECIALISTS[sid].name)
+        detail = persona_details_by_name.get(persona_name)
+        s = scores[i]
+        if detail is not None:
+            total = int(detail.get("total_score", 50))
+            specialist_responses_payload.append({
+                "specialist_id": sid,
+                "specialist_name": s.specialist_name,
+                "score_0_100": total,
+                "score_raw": max(1, min(10, round(total / 10))),
+                "summary": s.summary,
+                "objections": s.objections,
+            })
+        else:
+            specialist_responses_payload.append({
+                "specialist_id": s.specialist_id,
+                "specialist_name": s.specialist_name,
+                "score_0_100": s.score * 10,
+                "score_raw": s.score,
+                "summary": s.summary,
+                "objections": s.objections,
+            })
 
     # Persist decision to Supabase decisions table (best-effort; errors are logged but do not break the API).
     try:
         supabase = require_supabase()
         pid = resolve_project_uuid(project_id) or project_id
-        result = supabase.table("decisions").insert({
+        insert_payload: dict = {
             "project_id": pid,
             "question": title,
             "description": description,
-            "specialist_responses": json.dumps([
-                {
-                    "specialist_id": s.specialist_id,
-                    "specialist_name": s.specialist_name,
-                    "score_0_100": s.score * 10,
-                    "score_raw": s.score,
-                    "summary": s.summary,
-                    "objections": s.objections,
-                }
-                for s in scores
-            ]),
+            "specialist_responses": json.dumps(specialist_responses_payload),
             "conflict_summary": json.dumps({
                 "agreement": agreement,
                 "tradeoffs": tradeoffs,
+                "attached_labels": attached_labels,
             }),
-            # breakdowns will be filled by a later background job; keep as empty list for now
-            "breakdowns": json.dumps([]),
-        }).execute()
+            "decision_synthesis": json.dumps({}),  # populated by synthesis stage (decision_tree.md)
+        }
+        if body.parent_id:
+            insert_payload["parent_id"] = body.parent_id
+        result = supabase.table("decisions").insert(insert_payload).execute()
         data = (result.data or [])
         if data:
             decision_id = str(data[0].get("id"))
@@ -181,7 +231,34 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                     }).execute()
                 except Exception as score_err:
                     logger.warning("Failed to save persona score for %s: %s", pname, score_err)
-            # Also record a decision bubble in project chat so it appears in history
+
+            # Decision synthesis (decision_tree.md): score -> consensus/tradeoffs -> paths, ranking, next steps
+            summary_by_persona = {}
+            for i, sid in enumerate(specialist_ids):
+                pname = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, SPECIALISTS[sid].name)
+                summary_by_persona[pname] = scores[i].summary
+            persona_outputs = [
+                (
+                    pname,
+                    int(detail.get("total_score", 50)),
+                    summary_by_persona.get(pname, ""),
+                    list(detail.get("what_would_change_my_mind") or []),
+                )
+                for pname, detail in persona_details
+            ]
+            synthesis_result = synthesize_decision_tree(title, description, agreement, tradeoffs, persona_outputs)
+            if synthesis_result:
+                try:
+                    supabase.table("decisions").update({
+                        "decision_synthesis": json.dumps(synthesis_result),
+                    }).eq("id", decision_id).execute()
+                except Exception as syn_err:
+                    logger.warning("Failed to persist decision_synthesis for %s: %s", decision_id, syn_err)
+        else:
+            synthesis_result = None
+
+        # Also record a decision bubble in project chat so it appears in history (inside try for decision_id)
+        if data:
             try:
                 supabase.table("project_chat_messages").insert({
                     "project_id": pid,
@@ -200,6 +277,15 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         scores=scores,
         agreement=agreement,
         tradeoffs=tradeoffs,
+        persona_scores=response_persona_scores,
+        attached_labels=attached_labels,
+        decision_summary=synthesis_result.get("decision_summary") if synthesis_result else None,
+        core_tensions=synthesis_result.get("core_tensions") if synthesis_result else None,
+        paths=synthesis_result.get("paths") if synthesis_result else None,
+        path_ranking=synthesis_result.get("path_ranking") if synthesis_result else None,
+        recommended_path=synthesis_result.get("recommended_path") if synthesis_result else None,
+        recommended_path_next_steps=synthesis_result.get("recommended_path_next_steps") if synthesis_result else None,
+        decision_tree=synthesis_result.get("decision_tree") if synthesis_result else None,
     )
 
     return response
@@ -219,7 +305,7 @@ def get_decision(decision_id: str):
             raise HTTPException(status_code=404, detail="Decision not found")
         row = rows[0]
 
-        # specialist_responses is stored as JSON; decode if necessary
+        # specialist_responses is stored as JSON (fallback for summary/objections)
         specialist_raw = row.get("specialist_responses") or []
         if isinstance(specialist_raw, str):
             try:
@@ -228,26 +314,7 @@ def get_decision(decision_id: str):
                 specialist_responses = []
         else:
             specialist_responses = specialist_raw
-
-        scores: list[SpecialistScore] = []
-        for item in specialist_responses:
-            raw = item.get("score_raw")
-            score_0_100 = item.get("score_0_100")
-            if isinstance(raw, int):
-                score = raw
-            elif isinstance(score_0_100, (int, float)):
-                score = max(1, min(10, int(round(score_0_100 / 10))))
-            else:
-                score = 5
-            scores.append(
-                SpecialistScore(
-                    specialist_id=item.get("specialist_id", ""),
-                    specialist_name=item.get("specialist_name", ""),
-                    score=score,
-                    summary=item.get("summary", ""),
-                    objections=item.get("objections") or [],
-                )
-            )
+        by_specialist_id = {item.get("specialist_id"): item for item in specialist_responses if item.get("specialist_id")}
 
         conflict_raw = row.get("conflict_summary") or {}
         if isinstance(conflict_raw, str):
@@ -260,12 +327,42 @@ def get_decision(decision_id: str):
 
         agreement = conflict.get("agreement", "")
         tradeoffs = conflict.get("tradeoffs", "")
+        attached_labels = conflict.get("attached_labels")
+        if attached_labels is not None and not isinstance(attached_labels, list):
+            attached_labels = None
 
-        # Fetch decision_persona_scores for dimensions, what_would_change_my_mind, high_structural_risk
+        # Parse decision_synthesis JSONB for new output structure (decision_tree.md)
+        synthesis_raw = row.get("decision_synthesis") or {}
+        if isinstance(synthesis_raw, str):
+            try:
+                synthesis = json.loads(synthesis_raw)
+            except Exception:
+                synthesis = {}
+        else:
+            synthesis = synthesis_raw or {}
+
+        # Fetch decision_persona_scores — source of truth for scores; also used to build scores list
         persona_scores: list[DecisionPersonaScoreDetail] = []
+        scores: list[SpecialistScore] = []
         try:
             score_r = supabase.table("decision_persona_scores").select("*").eq("decision_id", decision_id).order("persona_name").execute()
             for ps_row in (score_r.data or []):
+                persona_name = str(ps_row.get("persona_name") or "")
+                total_score = int(ps_row.get("total_score") or 0)
+                sid = PERSONA_NAME_TO_SPECIALIST_ID.get(persona_name)
+                specialist_name = SPECIALISTS[sid].name if sid and sid in SPECIALISTS else persona_name
+                resp = by_specialist_id.get(sid, {}) if sid else {}
+                # Scores list derived from decision_persona_scores (total_score 0–100); summary/objections from specialist_responses
+                score_1_10 = max(1, min(10, round(total_score / 10))) if total_score else 5
+                scores.append(
+                    SpecialistScore(
+                        specialist_id=sid or "",
+                        specialist_name=specialist_name,
+                        score=score_1_10,
+                        summary=resp.get("summary", ""),
+                        objections=resp.get("objections") or [],
+                    )
+                )
                 dims_raw = ps_row.get("dimensions") or []
                 if isinstance(dims_raw, str):
                     try:
@@ -290,14 +387,35 @@ def get_decision(decision_id: str):
                         wwcm_raw = []
                 what_would_change = [str(x) for x in wwcm_raw] if isinstance(wwcm_raw, list) else []
                 persona_scores.append(DecisionPersonaScoreDetail(
-                    persona_name=str(ps_row.get("persona_name") or ""),
-                    total_score=int(ps_row.get("total_score") or 0),
+                    persona_name=persona_name,
+                    total_score=total_score,
                     dimensions=dimensions,
                     what_would_change_my_mind=what_would_change,
                     high_structural_risk=bool(ps_row.get("high_structural_risk")),
                 ))
         except Exception as e:
             logger.warning("Failed to load decision_persona_scores for %s: %s", decision_id, e)
+
+        # Legacy: if no decision_persona_scores, build scores from specialist_responses
+        if not scores and specialist_responses:
+            for item in specialist_responses:
+                raw = item.get("score_raw")
+                score_0_100 = item.get("score_0_100")
+                if isinstance(raw, int):
+                    score = raw
+                elif isinstance(score_0_100, (int, float)):
+                    score = max(1, min(10, int(round(score_0_100 / 10))))
+                else:
+                    score = 5
+                scores.append(
+                    SpecialistScore(
+                        specialist_id=item.get("specialist_id", ""),
+                        specialist_name=item.get("specialist_name", ""),
+                        score=score,
+                        summary=item.get("summary", ""),
+                        objections=item.get("objections") or [],
+                    )
+                )
 
         return DecisionEvaluateResponse(
             decision_id=str(row.get("id")),
@@ -306,6 +424,14 @@ def get_decision(decision_id: str):
             agreement=agreement,
             tradeoffs=tradeoffs,
             persona_scores=persona_scores,
+            attached_labels=attached_labels,
+            decision_summary=synthesis.get("decision_summary"),
+            core_tensions=synthesis.get("core_tensions"),
+            paths=synthesis.get("paths"),
+            path_ranking=synthesis.get("path_ranking"),
+            recommended_path=synthesis.get("recommended_path"),
+            recommended_path_next_steps=synthesis.get("recommended_path_next_steps"),
+            decision_tree=synthesis.get("decision_tree"),
         )
     except HTTPException:
         raise
@@ -375,10 +501,12 @@ def list_decisions_for_project(project_id: str):
 
             summary = agreement or tradeoffs or description
 
+            parent_id_val = row.get("parent_id")
             items.append(
                 {
                     "id": str(row.get("id")),
                     "project_id": str(row.get("project_id")),
+                    "parent_id": str(parent_id_val) if parent_id_val else None,
                     "title": row.get("question", ""),
                     "summary": summary,
                     # For now all stored decisions are "Evaluated"

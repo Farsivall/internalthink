@@ -24,6 +24,51 @@ export interface DecisionPersonaScoreDetail {
   high_structural_risk: boolean
 }
 
+/** Synthesis fields from decision_tree.md (stored in decision_synthesis JSONB) */
+export interface DecisionSynthesis {
+  decision_summary?: string | null
+  core_tensions?: string[] | null
+  paths?: Array<{
+    id: string
+    title: string
+    description?: string
+    assumptions?: string[]
+    upside?: string[]
+    downside?: string[]
+    execution_difficulty?: string
+    favored_by?: Array<{ persona: string; reason: string }>
+    concerned_by?: Array<{ persona: string; reason: string }>
+    next_steps_outline?: unknown[]
+  }> | null
+  path_ranking?: Array<{
+    path_id: string
+    rank: number
+    rationale?: string
+    confidence_level?: string
+    key_condition?: string
+  }> | null
+  recommended_path?: {
+    path_id?: string
+    title?: string
+    why_best?: string
+    risks_remain?: string
+    outperforms_alternatives?: string
+  } | null
+  recommended_path_next_steps?: Array<{
+    title: string
+    reason?: string
+    owner_type?: string
+    expected_outcome?: string
+    timeline_estimate?: string
+    specialist_support?: string
+  }> | null
+  decision_tree?: {
+    root?: unknown
+    nodes?: unknown[]
+    edges?: unknown[]
+  } | null
+}
+
 export interface DecisionEvaluateResponse {
   decision_id?: string | null
   decision_title: string
@@ -31,6 +76,16 @@ export interface DecisionEvaluateResponse {
   agreement: string
   tradeoffs: string
   persona_scores?: DecisionPersonaScoreDetail[]
+  /** Labels of documents/inline attachments used for this evaluation */
+  attached_labels?: string[] | null
+  /** From decision_synthesis JSONB */
+  decision_summary?: string | null
+  core_tensions?: string[] | null
+  paths?: DecisionSynthesis['paths']
+  path_ranking?: DecisionSynthesis['path_ranking']
+  recommended_path?: DecisionSynthesis['recommended_path']
+  recommended_path_next_steps?: DecisionSynthesis['recommended_path_next_steps']
+  decision_tree?: DecisionSynthesis['decision_tree']
 }
 
 export interface StoredDecisionResponse extends DecisionEvaluateResponse {
@@ -49,6 +104,7 @@ export interface DecisionEvaluateInput {
   context?: string | null
   document_ids?: string[] | null
   inline_documents?: InlineDocumentInput[] | null
+  parent_id?: string | null
 }
 
 export async function evaluateDecision(
@@ -67,6 +123,7 @@ export async function evaluateDecision(
       context: input.context ?? null,
       document_ids: input.document_ids?.length ? input.document_ids : null,
       inline_documents: input.inline_documents?.length ? input.inline_documents : null,
+      parent_id: input.parent_id ?? null,
     }),
   })
   if (!res.ok) {
@@ -90,6 +147,7 @@ export async function getDecision(decisionId: string): Promise<StoredDecisionRes
 export interface ProjectDecisionSummary {
   id: string
   project_id: string
+  parent_id?: string | null
   title: string
   summary: string
   status: string

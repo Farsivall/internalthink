@@ -13,6 +13,7 @@ class DecisionEvaluateRequest(BaseModel):
     context: str | None = None  # optional extra context
     document_ids: list[str] | None = None  # optional: limit context to these context_sources ids (e.g. proposal docs)
     inline_documents: list[InlineDocument] | None = None  # optional: use-only-for-this-eval content (e.g. pasted or extracted from file)
+    parent_id: str | None = None  # optional: link this decision as a branch from another (decision tree)
 
 
 class SpecialistScore(BaseModel):
@@ -48,3 +49,13 @@ class DecisionEvaluateResponse(BaseModel):
     agreement: str
     tradeoffs: str
     persona_scores: list[DecisionPersonaScoreDetail] = []  # from decision_persona_scores table
+    # Labels of documents/inline attachments used for this evaluation (for display in breakdown)
+    attached_labels: list[str] | None = None
+    # From decision_synthesis JSONB (decision_tree.md output structure)
+    decision_summary: str | None = None
+    core_tensions: list[str] | None = None
+    paths: list[dict] | None = None
+    path_ranking: list[dict] | None = None
+    recommended_path: dict | None = None
+    recommended_path_next_steps: list[dict] | None = None
+    decision_tree: dict | None = None
