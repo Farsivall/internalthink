@@ -23,6 +23,7 @@ VOICE_CALL_VOICE_IDS = {
     "legal": "9IzcwKmvwJcw58h3KnlH",
     "financial": "UgBBYS2sOqTuMpoF3BR0",
     "technical": "EXAVITQu4vr4xnSDxMaL",
+    "hydroelectric": "EXAVITQu4vr4xnSDxMaL",  # reuse technical
     "bd": "JBFqnCBsd6RMkjVDRZzb",
     "tax": "9IzcwKmvwJcw58h3KnlH",  # reuse first
 }
@@ -32,6 +33,7 @@ VOICE_IDS = {
     "legal": "pNInz6obpgDQGcFmaJgB",
     "financial": "21m00Tcm4TlvDq8ikWAM",
     "technical": "ErXwobaYiN019PkySvjV",
+    "hydroelectric": "ErXwobaYiN019PkySvjV",  # reuse technical
     "bd": "TX3LPaxmHKxFdv7VOQHJ",
     "tax": "EXAVITQu4vr4xnSDxMaL",
 }

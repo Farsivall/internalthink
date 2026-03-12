@@ -1,11 +1,19 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
+export interface CitationItem {
+  claim_or_section: string
+  source_label: string
+  snippet_or_quote: string
+}
+
 export interface SpecialistScore {
   specialist_id: string
   specialist_name: string
   score: number
   summary: string
   objections: string[]
+  citations?: CitationItem[] | null
+  sources_used?: string[] | null
 }
 
 export interface DimensionScoreDetail {
@@ -22,6 +30,7 @@ export interface DecisionPersonaScoreDetail {
   dimensions: DimensionScoreDetail[]
   what_would_change_my_mind: string[]
   high_structural_risk: boolean
+  citations?: CitationItem[] | null
 }
 
 /** Synthesis fields from decision_tree.md (stored in decision_synthesis JSONB) */
@@ -105,6 +114,7 @@ export interface DecisionEvaluateInput {
   document_ids?: string[] | null
   inline_documents?: InlineDocumentInput[] | null
   parent_id?: string | null
+  specialist_ids?: string[] | null
 }
 
 export async function evaluateDecision(
@@ -124,6 +134,7 @@ export async function evaluateDecision(
       document_ids: input.document_ids?.length ? input.document_ids : null,
       inline_documents: input.inline_documents?.length ? input.inline_documents : null,
       parent_id: input.parent_id ?? null,
+      specialist_ids: input.specialist_ids?.length ? input.specialist_ids : null,
     }),
   })
   if (!res.ok) {

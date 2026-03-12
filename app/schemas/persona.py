@@ -2,8 +2,26 @@
 
 from datetime import datetime
 from uuid import UUID
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
+
+
+class PersonaAvailableItem(BaseModel):
+    """One persona available for chat/decisions (id = specialist_id slug for API)."""
+    id: str
+    name: str
+    slug: str
+    type: str  # base_persona | subpersona
+    parent_slug: Optional[str] = None
+    description: Optional[str] = None
+    domain: Optional[str] = None
+    subdomain: Optional[str] = None
+    primary_sources: Optional[List[str]] = None  # RAG sources for marketplace display
+
+
+class PersonaInstallRequest(BaseModel):
+    company_id: str
+    persona_slug: str
 
 
 class PersonaDimensionResponse(BaseModel):

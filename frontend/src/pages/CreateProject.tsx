@@ -34,7 +34,7 @@ const INITIAL_DOC: DocEntry = {
   folderId: null,
 }
 
-const ACCEPT_FILES = '.pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation'
+const ACCEPT_FILES = '.pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.gif,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif'
 
 export function CreateProject() {
   const navigate = useNavigate()

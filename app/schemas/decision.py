@@ -14,6 +14,14 @@ class DecisionEvaluateRequest(BaseModel):
     document_ids: list[str] | None = None  # optional: limit context to these context_sources ids (e.g. proposal docs)
     inline_documents: list[InlineDocument] | None = None  # optional: use-only-for-this-eval content (e.g. pasted or extracted from file)
     parent_id: str | None = None  # optional: link this decision as a branch from another (decision tree)
+    specialist_ids: list[str] | None = None  # optional: evaluate with these specialists only (default: all); must be subset of SPECIALISTS
+
+
+class CitationItem(BaseModel):
+    """One citation tying a claim to a source."""
+    claim_or_section: str = ""
+    source_label: str = ""
+    snippet_or_quote: str = ""
 
 
 class SpecialistScore(BaseModel):
@@ -22,6 +30,8 @@ class SpecialistScore(BaseModel):
     score: int  # 1-10
     summary: str
     objections: list[str] = []
+    citations: list[CitationItem] | None = None
+    sources_used: list[str] | None = None  # RAG evidence labels shown as references at bottom
 
 
 class DimensionScoreDetail(BaseModel):
@@ -40,6 +50,7 @@ class DecisionPersonaScoreDetail(BaseModel):
     dimensions: list[DimensionScoreDetail] = []
     what_would_change_my_mind: list[str] = []
     high_structural_risk: bool = False
+    citations: list[CitationItem] | None = None
 
 
 class DecisionEvaluateResponse(BaseModel):

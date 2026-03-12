@@ -13,7 +13,13 @@ from app.api.deps import require_supabase
 from app.db.project_resolve import resolve_project_uuid
 from app.services.github import parse_repo_url, fetch_file_tree, select_important_files, fetch_file_contents
 from app.services.summariser import summarise_codebase
-from app.services.documents import extract_text_from_pdf, truncate_to_word_limit, strip_null_bytes
+from app.services.documents import (
+    extract_text_from_pdf,
+    extract_text_from_image,
+    IMAGE_EXTRACTION_MIMES,
+    truncate_to_word_limit,
+    strip_null_bytes,
+)
 from app.services.storage import upload_document, delete_document, move_document
 from app.services.folders import get_folder_path, list_folders, folder_has_children
 from app.services.rag import ingest_context_source
@@ -259,6 +265,15 @@ def create_document_text(request: DocumentTextRequest):
             detail=f"Database error: {str(e)}"
         )
 
+def _is_image_file(content_type: str, filename: str) -> bool:
+    """True if file is an image type we can extract text from."""
+    ct = (content_type or "").strip().lower()
+    if ct in IMAGE_EXTRACTION_MIMES or ct.startswith("image/"):
+        return True
+    fn = (filename or "").lower()
+    return any(fn.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"))
+
+
 @router.post("/document/extract-text")
 async def extract_document_text(file: UploadFile = File(...)):
     """Extract text from a file for use in a single evaluation (e.g. proposal). Does not save to DB or run RAG."""
@@ -268,6 +283,8 @@ async def extract_document_text(file: UploadFile = File(...)):
     try:
         if filename.lower().endswith(".pdf") or content_type == "application/pdf":
             content_val = truncate_to_word_limit(extract_text_from_pdf(file_bytes))
+        elif _is_image_file(content_type, filename):
+            content_val = truncate_to_word_limit(extract_text_from_image(file_bytes, content_type or "image/png"))
         else:
             content_val = truncate_to_word_limit(file_bytes.decode("utf-8", errors="replace"))
     except ValueError as e:
@@ -286,7 +303,7 @@ async def upload_document_file(
     folder_path: Optional[str] = Form(None),
     folder_id: Optional[str] = Form(None),
 ):
-    """Upload a PDF or text file. If folder_id or folder_path is set, stores in Storage (Drive-style) and metadata in DB; else extracts text and stores as before."""
+    """Upload a document (PDF, image, or text file). Extracts text for RAG (PDF and images via OCR/Vision). Stores file in Storage and metadata in DB."""
     pid = _resolve_project_uuid(project_id) or project_id
     if not pid:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -319,9 +336,12 @@ async def upload_document_file(
     try:
         if filename.lower().endswith(".pdf") or content_type == "application/pdf":
             content_val = truncate_to_word_limit(extract_text_from_pdf(file_bytes))
+        elif _is_image_file(content_type, filename):
+            content_val = truncate_to_word_limit(extract_text_from_image(file_bytes, content_type or "image/png"))
         else:
             content_val = truncate_to_word_limit(file_bytes.decode("utf-8", errors="replace"))
-    except Exception:
+    except Exception as e:
+        logger.warning("Text extraction failed for upload %s: %s", filename, e)
         content_val = None
 
     filename = strip_null_bytes(filename)

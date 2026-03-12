@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from app.engine.chat import call_specialist
 from app.personas import SPECIALISTS
 from app.personas.definitions import filter_context_for_specialist
+from app.services.persona import SPECIALIST_ID_TO_PERSONA_NAME
+from app.services.rag import retrieve_chunks_for_evaluation, format_chunks_for_citation
 from app.schemas.chat import SpecialistResponse
 
 logger = logging.getLogger(__name__)
@@ -30,19 +32,43 @@ async def evaluate_all_specialists(
     question: str,
     sources: list[dict],
     specialist_ids: list[str] | None = None,
+    project_id: str | None = None,
+    dimensions_by_persona: dict[str, list[dict]] | None = None,
 ) -> list[SpecialistResponse]:
     """
     Call specialists in parallel. Defaults to all 5.
+    When project_id (and optionally dimensions_by_persona) are provided, RAG retrieval
+    (company + domain) is used to inject relevant chunks into each specialist's context.
     Failed specialists return fallback responses, never crash.
     """
     ids = specialist_ids or list(SPECIALISTS.keys())
     loop = asyncio.get_running_loop()
+    dimensions_by_persona = dimensions_by_persona or {}
+
+    def _context_for(sid: str) -> str:
+        context_str = filter_context_for_specialist(sid, sources)
+        if project_id and question.strip():
+            persona_name = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, getattr(SPECIALISTS.get(sid), "name", sid))
+            dims = dimensions_by_persona.get(persona_name) or []
+            dimension_names = [(d.get("dimension_name") or "").strip() for d in dims if (d.get("dimension_name") or "").strip()]
+            try:
+                chunks = retrieve_chunks_for_evaluation(
+                    project_id=project_id,
+                    query=question[:800],
+                    persona_name=persona_name,
+                    dimension_names=dimension_names,
+                    top_k_company=6,
+                    top_k_domain=4,
+                )
+                if chunks:
+                    context_str += "\n\n**Retrieved evidence (use to ground your answer; cite by source when relevant):**\n"
+                    context_str += format_chunks_for_citation(chunks)
+            except Exception as e:
+                logger.warning("RAG retrieval failed for chat specialist %s: %s", sid, e)
+        return context_str
 
     tasks = [
-        loop.run_in_executor(
-            executor, _evaluate_sync, sid, question,
-            filter_context_for_specialist(sid, sources),
-        )
+        loop.run_in_executor(executor, _evaluate_sync, sid, question, _context_for(sid))
         for sid in ids
     ]
 
@@ -69,15 +95,17 @@ async def evaluate_all_specialists_for_decision_call(
     decision_row: dict,
     sources: list[dict],
     specialist_ids: list[str] | None = None,
+    dimensions_by_persona: dict[str, list[dict]] | None = None,
 ) -> list[SpecialistResponse]:
     """
     Call specialists in parallel for a *decision-focused call*.
 
     Context is built from the stored decision data plus main project documents,
-    following the behaviour described in prompt_files/chat.md.
+    and optionally RAG-retrieved chunks when dimensions_by_persona is provided.
     """
     ids = specialist_ids or list(SPECIALISTS.keys())
     loop = asyncio.get_running_loop()
+    dimensions_by_persona = dimensions_by_persona or {}
 
     # Pre-index specialist responses from the stored decision for quick lookup.
     specialist_responses = decision_row.get("specialist_responses") or []
@@ -116,6 +144,27 @@ async def evaluate_all_specialists_for_decision_call(
         else:
             retrieved_docs = docs_for_spec
 
+        # RAG: inject company + domain chunks when project and question are available
+        rag_block = ""
+        if project_label and question.strip():
+            persona_name = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, spec_name)
+            dims = dimensions_by_persona.get(persona_name) or []
+            dimension_names = [(d.get("dimension_name") or "").strip() for d in dims if (d.get("dimension_name") or "").strip()]
+            try:
+                chunks = retrieve_chunks_for_evaluation(
+                    project_id=project_label,
+                    query=question[:800],
+                    persona_name=persona_name,
+                    dimension_names=dimension_names,
+                    top_k_company=6,
+                    top_k_domain=4,
+                )
+                if chunks:
+                    rag_block = "\n\n**Retrieved evidence (use to ground your answer; cite by source when relevant):**\n"
+                    rag_block += format_chunks_for_citation(chunks)
+            except Exception as e:
+                logger.warning("RAG retrieval failed for decision-call specialist %s: %s", sid, e)
+
         # Build decision-focused context inline, mirroring prompt_files/chat.md
         context_str = f"""
 You are an expert persona: {spec_name}.
@@ -133,6 +182,7 @@ You are only reasoning about the specific decision provided. Your task is to sim
   - Evidence Gaps: (not explicitly recorded; infer from missing data in the documents if relevant)
 - Relevant Documents / Evidence:
 {retrieved_docs}
+{rag_block}
 
 ### Rules for Your Call Behavior:
 1. Only use the context above. Do NOT invent facts outside of the decision or documents.

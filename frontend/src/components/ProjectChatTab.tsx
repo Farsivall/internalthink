@@ -7,6 +7,7 @@ import { isVoiceAvailable, getVoiceAudio } from '../api/voice'
 import { evaluateDecision, getDecision, getProjectDecisions } from '../api/decision'
 import type { DecisionEvaluateResponse, ProjectDecisionSummary } from '../api/decision'
 import { uploadDocument, addDocumentText, extractDocumentText } from '../api/context'
+import { getPersonaDimensions, getSpecialistDisplayNames, type PersonaDimension } from '../api/personas'
 import { DecisionBreakdownModal } from './DecisionBreakdownModal'
 
 type DecisionFormAttachment =
@@ -65,6 +66,13 @@ export function ProjectChatTab({
   onOpenDocuments?: () => void
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(['legal', 'financial', 'technical']))
+  /** Ids removed via modal "Remove" — they disappear from the sidebar list (toggle is only for in/out of chat) */
+  const [removedFromSidebar, setRemovedFromSidebar] = useState<Set<string>>(new Set())
+  const [groupProfileOpen, setGroupProfileOpen] = useState(false)
+  const [groupProfileAddSearch, setGroupProfileAddSearch] = useState('')
+  const [personaScoringPopoverId, setPersonaScoringPopoverId] = useState<string | null>(null)
+  const [groupProfileDimensions, setGroupProfileDimensions] = useState<PersonaDimension[]>([])
+  const [specialistDisplayNames, setSpecialistDisplayNames] = useState<Record<string, string>>({})
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [input, setInput] = useState('')
@@ -254,6 +262,24 @@ export function ProjectChatTab({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [allMessages.length])
 
+  useEffect(() => {
+    if (!groupProfileOpen) return
+    setPersonaScoringPopoverId(null)
+    setGroupProfileAddSearch('')
+    getPersonaDimensions()
+      .then(setGroupProfileDimensions)
+      .catch(() => setGroupProfileDimensions([]))
+  }, [groupProfileOpen])
+
+  useEffect(() => {
+    getSpecialistDisplayNames().then(setSpecialistDisplayNames).catch(() => {})
+  }, [])
+
+  const getDisplayName = useCallback(
+    (spec: { id: string; name: string }) => specialistDisplayNames[spec.id] ?? spec.name,
+    [specialistDisplayNames]
+  )
+
   const toggleSpecialist = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -346,7 +372,7 @@ export function ProjectChatTab({
         for (const msg of batch) {
           if (msg.sender === 'user') continue
           const specialist = mockSpecialists.find((s) => s.id === msg.sender)
-          const name = specialist?.name ?? msg.sender
+          const name = specialistDisplayNames[msg.sender] ?? specialist?.name ?? msg.sender
           setSpeakingNow(name)
           try {
             const blob = await getVoiceAudio(msg.sender, msg.text, { voiceCall: true })
@@ -360,7 +386,7 @@ export function ProjectChatTab({
         onAllDone()
       }
     },
-    [voiceAvailable, playBlob]
+    [voiceAvailable, playBlob, specialistDisplayNames]
   )
 
   const sendMessageText = useCallback(
@@ -569,6 +595,7 @@ export function ProjectChatTab({
               ) : (
                 <button
                   type="button"
+                  onClick={() => setGroupProfileOpen(true)}
                   className="p-2 rounded-full hover:bg-white/10 transition-colors shrink-0"
                   title="Group info"
                 >
@@ -657,9 +684,9 @@ export function ProjectChatTab({
                                     }}
                                   >
                                     <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: s.color }}>
-                                      {s.name.slice(0, 1)}
+                                      {getDisplayName(s).slice(0, 1)}
                                     </span>
-                                    {s.name}
+                                    {getDisplayName(s)}
                                     {selected && <ion-icon name="checkmark" className="text-sm" />}
                                   </button>
                                 )
@@ -804,9 +831,9 @@ export function ProjectChatTab({
                     className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-4"
                     style={{ backgroundColor: specialistsInChat[0].color }}
                   >
-                    {specialistsInChat[0].name.slice(0, 1)}
+                    {getDisplayName(specialistsInChat[0]).slice(0, 1)}
                   </div>
-                  <h3 className="font-medium text-white/80 mb-2">Direct message with {specialistsInChat[0].name}</h3>
+                  <h3 className="font-medium text-white/80 mb-2">Direct message with {getDisplayName(specialistsInChat[0])}</h3>
                   <p className="text-sm text-white/60 leading-relaxed">
                     About {projectName ?? 'this project'}. Send a message to start the conversation.
                   </p>
@@ -838,7 +865,7 @@ export function ProjectChatTab({
                         className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white"
                         style={{ backgroundColor: specialist.color }}
                       >
-                        {specialist.name.slice(0, 1)}
+                        {getDisplayName(specialist).slice(0, 1)}
                       </div>
                     )}
                     <div className="flex flex-col gap-1">
@@ -872,7 +899,7 @@ export function ProjectChatTab({
                       >
                         {!isUser && specialist && !isDecisionMsg && (
                           <p className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: specialist.color }}>
-                            {specialist.name}
+                            {getDisplayName(specialist)}
                             {hasThinking && (
                               <ion-icon
                                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1041,6 +1068,9 @@ export function ProjectChatTab({
                             }
                           }
                         }
+                        const sidebarSpecialistIds = mockSpecialists
+                          .filter((s) => !removedFromSidebar.has(s.id))
+                          .map((s) => s.id)
                         const res = await evaluateDecision(projectId, {
                           title: decisionFormTitle.trim(),
                           description: decisionFormDescription.trim(),
@@ -1048,6 +1078,7 @@ export function ProjectChatTab({
                           document_ids: documentIds.length > 0 ? documentIds : undefined,
                           inline_documents:
                             inlineDocuments.length > 0 ? inlineDocuments : undefined,
+                          specialist_ids: sidebarSpecialistIds.length > 0 ? sidebarSpecialistIds : undefined,
                         })
                         const now = new Date().toISOString()
                         const decisionMsgId = `decision-${Date.now()}`
@@ -1141,7 +1172,7 @@ export function ProjectChatTab({
                           ref={decisionFormFileInputRef}
                           type="file"
                           multiple
-                          accept=".pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.gif,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
                           className="hidden"
                           onChange={(e) => {
                             const files = e.target.files ? Array.from(e.target.files) : []
@@ -1304,9 +1335,9 @@ export function ProjectChatTab({
                             className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
                             style={{ backgroundColor: s.color }}
                           >
-                            {s.name.slice(0, 1)}
+                            {getDisplayName(s).slice(0, 1)}
                           </div>
-                          <span className="flex-1 text-sm text-white">{s.name}</span>
+                          <span className="flex-1 text-sm text-white">{getDisplayName(s)}</span>
                           <ion-icon name="chevron-forward" className="text-white/50 text-lg" />
                         </button>
                       </li>
@@ -1319,7 +1350,7 @@ export function ProjectChatTab({
                     {plusSelectedSpecialist && (
                       <>
                         <p className="text-sm text-white/80">
-                          Chat with <strong style={{ color: plusSelectedSpecialist.color }}>{plusSelectedSpecialist.name}</strong> about this project?
+                          Chat with <strong style={{ color: plusSelectedSpecialist.color }}>{getDisplayName(plusSelectedSpecialist)}</strong> about this project?
                         </p>
                         <div className="rounded-xl bg-surface-700/80 border border-white/10 p-3">
                           <p className="text-xs text-white/50 mb-1">Project</p>
@@ -1398,7 +1429,7 @@ export function ProjectChatTab({
                       .filter((s) => {
                         if (!mentionQuery) return true
                         return (
-                          s.name.toLowerCase().includes(mentionQuery) ||
+                          getDisplayName(s).toLowerCase().includes(mentionQuery) ||
                           s.id.toLowerCase().includes(mentionQuery)
                         )
                       })
@@ -1488,9 +1519,9 @@ export function ProjectChatTab({
                     className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
                     style={{ backgroundColor: specialistsInChat[0].color }}
                   >
-                    {specialistsInChat[0].name.slice(0, 1)}
+                    {getDisplayName(specialistsInChat[0]).slice(0, 1)}
                   </div>
-                  <span className="text-sm text-white">{specialistsInChat[0].name}</span>
+                  <span className="text-sm text-white">{getDisplayName(specialistsInChat[0])}</span>
                 </div>
               )}
               <button
@@ -1506,10 +1537,10 @@ export function ProjectChatTab({
             <>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-white/60">Specialists in chat</span>
-                <span className="text-xs text-white/40">{selectedIds.size}/5</span>
+                <span className="text-xs text-white/40">{selectedIds.size}/{mockSpecialists.length - removedFromSidebar.size}</span>
               </div>
               <ul className="space-y-1">
-                {mockSpecialists.map((s) => {
+                {mockSpecialists.filter((s) => !removedFromSidebar.has(s.id)).map((s) => {
                   const inChat = selectedIds.has(s.id)
                   return (
                     <li key={s.id}>
@@ -1524,10 +1555,10 @@ export function ProjectChatTab({
                           className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
                           style={{ backgroundColor: inChat ? s.color : undefined }}
                         >
-                          {inChat ? s.name.slice(0, 1) : <ion-icon name="add" className="text-white/60" />}
+                          {inChat ? getDisplayName(s).slice(0, 1) : <ion-icon name="add" className="text-white/60" />}
                         </div>
                         <span className={`flex-1 text-sm truncate ${inChat ? 'text-white' : 'text-white/50'}`}>
-                          {s.name}
+                          {getDisplayName(s)}
                         </span>
                         {inChat ? (
                           <ion-icon name="checkmark-circle" style={{ color: s.color }} className="shrink-0 text-lg" />
@@ -1560,6 +1591,186 @@ export function ProjectChatTab({
           </button>
         </div>
       </aside>
+
+      {/* Group profile modal */}
+      {groupProfileOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setGroupProfileOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-surface-800 border border-white/10 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <h3 className="font-semibold text-white">Chat participants</h3>
+              <button
+                type="button"
+                onClick={() => setGroupProfileOpen(false)}
+                className="p-2 rounded-full hover:bg-white/10 text-white/80"
+              >
+                <ion-icon name="close" className="text-xl" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div>
+                <p className="text-xs font-medium text-white/60 mb-2">In this chat</p>
+                <ul className="space-y-1">
+                  {mockSpecialists
+                    .filter((s) => selectedIds.has(s.id))
+                    .map((s) => (
+                      <li key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5">
+                        <div
+                          className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
+                          style={{ backgroundColor: s.color }}
+                        >
+                          {getDisplayName(s).slice(0, 1)}
+                        </div>
+                        <span className="flex-1 text-sm text-white">{getDisplayName(s)}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev)
+                              next.delete(s.id)
+                              return next
+                            })
+                            setRemovedFromSidebar((prev) => new Set(prev).add(s.id))
+                          }}
+                          className="px-2 py-1 rounded text-xs font-medium text-white/80 hover:bg-white/10"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+                {selectedIds.size === 0 && (
+                  <p className="text-xs text-white/50 px-3 py-2">No participants. Add from My personas below.</p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-white/60 mb-2">Add from My personas</p>
+                <div className="relative mb-2">
+                  <input
+                    type="search"
+                    placeholder="Search by name…"
+                    value={groupProfileAddSearch}
+                    onChange={(e) => setGroupProfileAddSearch(e.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-surface-700/80 px-3 py-2 pl-9 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  />
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40">
+                    <ion-icon name="search" className="text-lg" />
+                  </span>
+                </div>
+                <ul className="space-y-1">
+                  {mockSpecialists
+                    .filter((s) => {
+                      if (selectedIds.has(s.id)) return false
+                      const q = groupProfileAddSearch.trim().toLowerCase()
+                      if (!q) return true
+                      return getDisplayName(s).toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
+                    })
+                    .map((s) => (
+                      <li key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5">
+                        <div
+                          className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
+                          style={{ backgroundColor: s.color }}
+                        >
+                          {getDisplayName(s).slice(0, 1)}
+                        </div>
+                        <span className="flex-1 text-sm text-white/80 truncate">{getDisplayName(s)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPersonaScoringPopoverId((prev) => (prev === s.id ? null : s.id))}
+                          className="p-1.5 rounded-full hover:bg-white/10 text-white/60 hover:text-white shrink-0"
+                          title="Scoring dimensions"
+                        >
+                          <ion-icon name="information-circle-outline" className="text-lg" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedIds((prev) => new Set(prev).add(s.id))
+                            setRemovedFromSidebar((prev) => {
+                              const next = new Set(prev)
+                              next.delete(s.id)
+                              return next
+                            })
+                          }}
+                          className="px-2 py-1 rounded text-xs font-medium text-white/80 hover:bg-white/10 shrink-0"
+                        >
+                          Add
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+                {mockSpecialists.every((s) => selectedIds.has(s.id)) && (
+                  <p className="text-xs text-white/50 px-3 py-2">All My personas are in the chat.</p>
+                )}
+                {mockSpecialists.filter((s) => !selectedIds.has(s.id)).length > 0 &&
+                  groupProfileAddSearch.trim() &&
+                  mockSpecialists.filter((s) => {
+                    if (selectedIds.has(s.id)) return false
+                    const q = groupProfileAddSearch.trim().toLowerCase()
+                    return getDisplayName(s).toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
+                  }).length === 0 && (
+                    <p className="text-xs text-white/50 px-3 py-2">No personas match your search.</p>
+                  )}
+                {personaScoringPopoverId && (() => {
+                  const spec = mockSpecialists.find((s) => s.id === personaScoringPopoverId)
+                  if (!spec) return null
+                  const personaNameMatch = (d: PersonaDimension) =>
+                    d.persona_name === spec.name ||
+                    (spec.id === 'bd' && d.persona_name === 'Business Dev') ||
+                    (spec.name === 'Business Development' && d.persona_name === 'Business Dev')
+                  const dims = groupProfileDimensions.filter(personaNameMatch).sort((a, b) => a.sort_order - b.sort_order)
+                  return (
+                    <div
+                      className="mt-3 rounded-xl border border-white/10 bg-surface-700/90 overflow-hidden"
+                      role="dialog"
+                      aria-label="Scoring dimensions"
+                    >
+                      <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                        <p className="text-sm font-medium text-white">
+                          Scoring · {getDisplayName(spec)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setPersonaScoringPopoverId(null)}
+                          className="p-1 rounded-full hover:bg-white/10 text-white/60"
+                        >
+                          <ion-icon name="close" className="text-lg" />
+                        </button>
+                      </div>
+                      <ul className="p-3 space-y-2 max-h-48 overflow-y-auto">
+                        {dims.length === 0 ? (
+                          <li className="text-xs text-white/50">No dimension data for this persona.</li>
+                        ) : (
+                          dims.map((d) => (
+                            <li key={d.id} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-white/80 truncate">{d.dimension_name}</span>
+                              <span className="text-white/50 shrink-0">{(d.base_weight * 100).toFixed(0)}%</span>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setGroupProfileOpen(false)}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/10 text-white hover:bg-white/15"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

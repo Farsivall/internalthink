@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { mockSpecialists } from '../data/mock'
-import type { DecisionEvaluateResponse } from '../api/decision'
+import type { DecisionEvaluateResponse, CitationItem } from '../api/decision'
 
 /** Display name (from scores) may differ from persona_name in API (e.g. Business Development → Business Dev). */
 const SPECIALIST_DISPLAY_TO_PERSONA_NAMES: Record<string, string[]> = {
@@ -16,34 +16,71 @@ function getSpecialistColor(id: string): string {
   return spec?.color ?? '#6b7280'
 }
 
+/** Only treat as JSON when clearly structured (starts with { and has Dimensions/Name keys). */
+function looksLikeJsonSummary(s: string): boolean {
+  const t = (s || '').trim()
+  if (!t) return false
+  if (t.startsWith('{') && (t.includes('"Dimensions"') || t.includes('"Name":'))) return true
+  if (/\s*\{\s*"Dimensions"/.test(t) || /"Name":\s*"[^"]+",\s*"Score"/.test(t)) return true
+  return false
+}
+
+/** Avoid showing raw JSON; use fallback only when content is clearly JSON. */
+function formatSummaryForDisplay(summary: string, scoreLabel?: string): string {
+  const t = (summary || '').trim()
+  if (!t) return scoreLabel ?? 'No summary.'
+  if (looksLikeJsonSummary(t)) return scoreLabel ?? 'Evaluation completed. See dimension scores below.'
+  return t
+}
+
+function formatObjectionForDisplay(obj: string): string {
+  const t = (obj || '').trim()
+  if (!t) return t
+  if (looksLikeJsonSummary(t)) return ''
+  return t
+}
+
 function getPersonaColorByName(name: string): string {
   const byName: Record<string, string> = {}
   mockSpecialists.forEach((s) => {
     byName[s.name] = s.color
     if (s.name === 'Business Development') byName['Business Dev'] = s.color
   })
+  byName['BD'] = byName['Business Development'] ?? byName['Business Dev'] ?? '#6b7280'
+  byName['HP'] = byName['Hydroelectric'] ?? '#6b7280'
+  byName['HPF'] = byName['Hydroelectric Project Finance Specialist'] ?? '#6b7280'
+  byName['HR'] = byName['Hydroelectric Regulatory & Compliance Specialist'] ?? '#6b7280'
   return byName[name] ?? '#6b7280'
 }
 
+const COLORED_TOKENS = [
+  ...mockSpecialists.map((s) => s.name),
+  'Business Dev',
+  'Hydroelectric Project Finance Specialist',
+  'Hydroelectric Regulatory & Compliance Specialist',
+  'HPF',
+  'HR',
+  'HP',
+  'BD',
+].sort((a, b) => b.length - a.length)
+
 function ColorCodedText({ text }: { text: string }) {
-  const names = mockSpecialists.map((s) => s.name)
   const parts: { str: string; color?: string }[] = []
   let remaining = text
   while (remaining.length > 0) {
-    let best: { name: string; index: number } | null = null
-    for (const name of names) {
-      const i = remaining.indexOf(name)
-      if (i !== -1 && (best === null || i < best.index)) best = { name, index: i }
+    let best: { token: string; index: number } | null = null
+    for (const token of COLORED_TOKENS) {
+      const i = remaining.indexOf(token)
+      if (i !== -1 && (best === null || i < best.index)) best = { token, index: i }
     }
     if (best === null) {
       parts.push({ str: remaining })
       break
     }
     if (best.index > 0) parts.push({ str: remaining.slice(0, best.index) })
-    const spec = mockSpecialists.find((s) => s.name === best!.name)
-    const color = spec ? getSpecialistColor(spec.id) : undefined
-    parts.push({ str: best.name, color })
-    remaining = remaining.slice(best.index + best.name.length)
+    const color = getPersonaColorByName(best.token)
+    parts.push({ str: best.token, color: color !== '#6b7280' ? color : undefined })
+    remaining = remaining.slice(best.index + best.token.length)
   }
   return (
     <span>
@@ -114,7 +151,30 @@ export function DecisionBreakdownModal({
     if (p.name === 'Business Dev') scoreByDisplayName['Business Development'] = p.score
   })
 
-  const PERSONA_NAMES_FOR_MATCH = ['Legal', 'Financial', 'Technical', 'Business Development', 'Business Dev', 'Tax']
+  // Match both full names and shortforms; order so longer names are tried first (e.g. Hydroelectric Project Finance before Hydroelectric)
+  const PERSONA_NAMES_FOR_MATCH = [
+    'Hydroelectric Project Finance Specialist',
+    'Hydroelectric Regulatory & Compliance Specialist',
+    'Business Development',
+    'Business Dev',
+    'Hydroelectric',
+    'Legal',
+    'Financial',
+    'Technical',
+    'Tax',
+  ]
+  /** Shortforms for headlines so "Where experts disagree" stays compact */
+  const PERSONA_SHORTFORM: Record<string, string> = {
+    'Legal': 'Legal',
+    'Financial': 'Financial',
+    'Technical': 'Technical',
+    'Tax': 'Tax',
+    'Business Development': 'BD',
+    'Business Dev': 'BD',
+    'Hydroelectric': 'HP',
+    'Hydroelectric Project Finance Specialist': 'HPF',
+    'Hydroelectric Regulatory & Compliance Specialist': 'HR',
+  }
 
   function formatDisagreeItem(tradeoffText: string): { headline: string; detail: string } {
     const lower = tradeoffText.toLowerCase()
@@ -133,9 +193,11 @@ export function DecisionBreakdownModal({
       .slice(0, 2)
     if (firstTwo.length >= 2) {
       const [a, b] = firstTwo
-      const scoreA = scoreByDisplayName[a.name] ?? 0
-      const scoreB = scoreByDisplayName[b.name] ?? 0
-      const headline = `${a.name} (${scoreA}) vs ${b.name} (${scoreB})`
+      const scoreA = scoreByDisplayName[a.name] ?? scoreByDisplayName['Business Development'] ?? 0
+      const scoreB = scoreByDisplayName[b.name] ?? scoreByDisplayName['Business Development'] ?? 0
+      const shortA = PERSONA_SHORTFORM[a.name] ?? a.name
+      const shortB = PERSONA_SHORTFORM[b.name] ?? b.name
+      const headline = `${shortA} (${scoreA}) vs ${shortB} (${scoreB})`
       const splitMatch = tradeoffText.match(/\s+[—–-]\s+/)
       const detail = splitMatch
         ? tradeoffText.slice(tradeoffText.indexOf(splitMatch[0]) + splitMatch[0].length).trim()
@@ -155,10 +217,10 @@ export function DecisionBreakdownModal({
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-surface-800 border border-white/10 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header: title + total score + attachments */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-white/10 shrink-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-base font-semibold text-white">Decision breakdown</h2>
-            <span className="text-sm text-white/70 font-medium">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-4 border-b border-white/10 shrink-0">
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <h2 className="text-base font-semibold text-white shrink-0">Decision breakdown</h2>
+            <span className="text-sm text-white/70 font-medium whitespace-nowrap shrink-0">
               Total: {totalScore} / {MAX_TOTAL}
             </span>
             {(decision.attached_labels?.length ?? 0) > 0 && (
@@ -445,17 +507,17 @@ export function DecisionBreakdownModal({
                         <button
                           type="button"
                           onClick={() => togglePersona(s.specialist_id)}
-                          className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/5 transition-colors"
+                          className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/5 transition-colors min-w-0"
                         >
                           <ion-icon
                             name={isExpanded ? 'chevron-down' : 'chevron-forward'}
                             className="text-lg text-white/60 shrink-0"
                           />
-                          <span className="text-sm font-semibold shrink-0" style={{ color }}>
+                          <span className="text-sm font-semibold min-w-0 truncate" style={{ color }} title={s.specialist_name}>
                             {s.specialist_name}
                           </span>
-                          <span className="text-xs text-white/50">Score</span>
-                          <span className="text-sm font-bold text-white tabular-nums">
+                          <span className="text-xs text-white/50 shrink-0">Score</span>
+                          <span className="text-sm font-bold text-white tabular-nums shrink-0">
                             {displayScore}/100
                           </span>
                           {personaScore?.high_structural_risk && (
@@ -468,18 +530,22 @@ export function DecisionBreakdownModal({
                           <div className="space-y-3 text-xs leading-relaxed px-4 pb-4 pt-0 border-t border-white/10">
                             <div>
                               <p className="text-white/50 mb-0.5">Summary</p>
-                              <p className="text-white/85">{s.summary}</p>
+                              <p className="text-white/85">{formatSummaryForDisplay(s.summary, `Evaluation completed. Score: ${displayScore}/100. See dimension scores below.`)}</p>
                             </div>
-                            {s.objections.length > 0 && (
-                              <div>
-                                <p className="text-white/50 mb-0.5">Key risks / objections</p>
-                                <ul className="list-disc list-inside text-white/75 space-y-0.5">
-                                  {s.objections.map((o, i) => (
-                                    <li key={i}>{o}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
+                            {(() => {
+                              const validObjections = s.objections.map((o) => formatObjectionForDisplay(o)).filter(Boolean)
+                              if (validObjections.length === 0) return null
+                              return (
+                                <div>
+                                  <p className="text-white/50 mb-0.5">Key risks / objections</p>
+                                  <ul className="list-disc list-inside text-white/75 space-y-0.5">
+                                    {validObjections.map((o, i) => (
+                                      <li key={i}>{o}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )
+                            })()}
                             {personaScore?.dimensions?.length > 0 && (
                               <div>
                                 <p className="text-white/50 mb-1">Dimension scores</p>
@@ -506,6 +572,38 @@ export function DecisionBreakdownModal({
                                 </ul>
                               </div>
                             )}
+                            {(() => {
+                              const citations: CitationItem[] = s.citations ?? personaScore?.citations ?? []
+                              const sourcesUsed: string[] = s.sources_used ?? []
+                              const hasRefs = citations.length > 0 || sourcesUsed.length > 0
+                              if (!hasRefs) return null
+                              return (
+                                <div>
+                                  <p className="text-white/50 mb-0.5">References</p>
+                                  {citations.length > 0 && (
+                                    <ul className="space-y-1 text-white/70 mb-2">
+                                      {citations.map((c, i) => (
+                                        <li key={i} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs">
+                                          <span className="text-white/50">{c.claim_or_section || 'Evidence'}:</span>{' '}
+                                          <span className="font-mono text-amber-200/90">{c.source_label}</span>
+                                          {c.snippet_or_quote && (
+                                            <span className="block mt-0.5 text-white/60 italic">&ldquo;{c.snippet_or_quote}&rdquo;</span>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {sourcesUsed.length > 0 && (
+                                    <p className="text-xs text-white/60">
+                                      Sources used in this evaluation:{' '}
+                                      <span className="font-mono text-amber-200/90">
+                                        {sourcesUsed.join('; ')}
+                                      </span>
+                                    </p>
+                                  )}
+                                </div>
+                              )
+                            })()}
                           </div>
                         )}
                       </div>

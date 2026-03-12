@@ -4,7 +4,7 @@ import { getProject } from '../api/projects'
 import { getProject as getMockProject } from '../data/mock'
 import { ProjectChatTab } from '../components/ProjectChatTab'
 import { ProjectDocumentsTab } from '../components/ProjectDocumentsTab'
-import { ProjectDecisionHappinessTab } from '../components/ProjectDecisionHappinessTab'
+import { ProjectDecisionTreeTab } from '../components/ProjectDecisionTreeTab'
 
 type Tab = 'chat' | 'documents' | 'decisions'
 
@@ -66,7 +66,7 @@ export function ProjectDetail() {
         </div>
       </div>
 
-      {/* Nav tabs: Chat | Documents | Decision happiness */}
+      {/* Nav tabs: Chat | Documents | Decision tree */}
       <nav className="flex border-b border-white/10 mb-6">
         <button
           type="button"
@@ -101,8 +101,8 @@ export function ProjectDetail() {
               : 'text-white/60 border-transparent hover:text-white'
           }`}
         >
-          <ion-icon name="happy-outline" className="text-lg" />
-          Decision happiness
+          <ion-icon name="git-branch-outline" className="text-lg" />
+          Decision tree
         </button>
       </nav>
 
@@ -115,7 +115,7 @@ export function ProjectDetail() {
         />
       )}
       {activeTab === 'documents' && project.id && <ProjectDocumentsTab projectId={project.id} />}
-      {activeTab === 'decisions' && project.id && <ProjectDecisionHappinessTab projectId={project.id} />}
+      {activeTab === 'decisions' && project.id && <ProjectDecisionTreeTab projectId={project.id} />}
     </div>
   )
 }

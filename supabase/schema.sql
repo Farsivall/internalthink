@@ -36,11 +36,16 @@ CREATE TABLE IF NOT EXISTS context_sources (
 CREATE TABLE IF NOT EXISTS decisions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES decisions(id) ON DELETE SET NULL,
     question TEXT NOT NULL,
+    description TEXT,
     specialist_responses JSONB NOT NULL DEFAULT '[]'::jsonb,
     conflict_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    decision_synthesis JSONB DEFAULT '{}'::jsonb, -- decision_summary, core_tensions, paths, path_ranking, recommended_path, recommended_path_next_steps, decision_tree (see decision_tree.md)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_decisions_parent_id ON decisions(parent_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_project_parent ON decisions(project_id, parent_id);
 
 -- project_chat_messages — chat thread per project (user + specialist messages)
 CREATE TABLE IF NOT EXISTS project_chat_messages (

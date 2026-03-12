@@ -90,15 +90,21 @@ const PERSONA_COLORS: Record<string, string> = {
   legal: '#6366f1',
   financial: '#22c55e',
   technical: '#0ea5e9',
+  hydroelectric: '#06b6d4',
+  hydroelectric_finance: '#16a34a',
+  hydroelectric_regulatory: '#4f46e5',
   bd: '#f59e0b',
   tax: '#a855f7',
 }
 
-/** All available specialists (backend spec: Legal, Financial, Technical, BD, Tax) */
+/** All available specialists (backend spec: Legal, Financial, Technical, Hydroelectric, BD, Tax + hydro subpersonas) */
 export const mockSpecialists: Specialist[] = [
   { id: 'legal', name: 'Legal', color: PERSONA_COLORS.legal },
   { id: 'financial', name: 'Financial', color: PERSONA_COLORS.financial },
   { id: 'technical', name: 'Technical', color: PERSONA_COLORS.technical },
+  { id: 'hydroelectric', name: 'Hydroelectric', color: PERSONA_COLORS.hydroelectric },
+  { id: 'hydroelectric_finance', name: 'Hydroelectric Project Finance Specialist', color: PERSONA_COLORS.hydroelectric_finance },
+  { id: 'hydroelectric_regulatory', name: 'Hydroelectric Regulatory & Compliance Specialist', color: PERSONA_COLORS.hydroelectric_regulatory },
   { id: 'bd', name: 'Business Development', color: PERSONA_COLORS.bd },
   { id: 'tax', name: 'Tax', color: PERSONA_COLORS.tax },
 ]

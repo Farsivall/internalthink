@@ -44,7 +44,7 @@ function toProjectDocument(c: ContextSource): ProjectDocument {
   }
 }
 
-const ACCEPT_FILES = '.pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation'
+const ACCEPT_FILES = '.pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.gif,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif'
 
 const ROOT_ID = '__root__'
 
@@ -170,7 +170,7 @@ export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
         try {
           const result = await getDroppedFilesAndFolders(e.dataTransfer)
           if (result.files.length === 0) {
-            setUploadError('No accepted files (PDF, TXT, MD, DOCX, PPTX)')
+            setUploadError('No accepted files (PDF, TXT, MD, DOCX, PPTX, or images)')
             return
           }
 
@@ -381,7 +381,7 @@ export function ProjectDocumentsTab({ projectId }: { projectId: string }) {
                   <>
                     <ion-icon name="cloud-upload" className="text-5xl mb-2" />
                     <p className="text-sm font-medium">Drop files or folder</p>
-                    <p className="text-xs text-white/50 mt-1">PDF, TXT, MD, DOCX, PPTX — folder structure is preserved</p>
+                    <p className="text-xs text-white/50 mt-1">PDF, TXT, MD, DOCX, PPTX, PNG, JPG, WebP, GIF — folder structure is preserved</p>
                   </>
                 )}
               </div>

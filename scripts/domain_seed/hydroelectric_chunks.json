@@ -1,0 +1,122 @@
+[
+  {
+    "chunk_text": "Run-of-river hydropower plants depend directly on river flow rather than large reservoirs for storage. Because of this, electricity generation can fluctuate significantly with seasonal water levels. During dry seasons or periods of drought, flow rates may drop below the levels required for full turbine capacity, reducing power output. Reliable project evaluation therefore requires modeling seasonal flow patterns and minimum dependable generation rather than relying only on annual average discharge.",
+    "topic": "hydrology",
+    "source": "International Energy Agency – Hydropower Technology Roadmap",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "International Energy Agency",
+    "document_title": "Hydropower Technology Roadmap"
+  },
+  {
+    "chunk_text": "Hydroelectric turbine selection depends primarily on two physical parameters: hydraulic head and water flow rate. Pelton turbines are typically used in high-head, low-flow environments such as mountainous regions. Francis turbines are suitable for medium head and moderate flow conditions and are among the most commonly installed turbines worldwide. Kaplan turbines are designed for low-head, high-flow rivers and allow adjustable blades to maintain efficiency across varying flow conditions.",
+    "topic": "turbine_selection",
+    "source": "U.S. Department of Energy – Hydropower Basics",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "U.S. Department of Energy",
+    "document_title": "Hydropower Basics"
+  },
+  {
+    "chunk_text": "Sediment transported by rivers can accumulate in reservoirs or damage turbine components through abrasion. High sediment loads may reduce reservoir storage capacity over time and increase maintenance requirements for electro-mechanical equipment. Effective sediment management strategies include sediment flushing, bypass tunnels, and desilting basins upstream of turbine intake structures.",
+    "topic": "sediment_management",
+    "source": "World Bank – Hydropower Sustainability Guidelines",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "World Bank",
+    "document_title": "Hydropower Sustainability Guidelines"
+  },
+  {
+    "chunk_text": "Hydropower plants must connect to a transmission network capable of absorbing the generated electricity. Grid connection feasibility depends on the distance to existing transmission infrastructure, available network capacity, and grid stability requirements. In remote locations, the cost of building new transmission lines can represent a significant portion of total project costs.",
+    "topic": "grid_connection",
+    "source": "International Energy Agency – Hydropower Technology Roadmap",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "International Energy Agency",
+    "document_title": "Hydropower Technology Roadmap"
+  },
+  {
+    "chunk_text": "Hydropower construction projects frequently encounter delays due to geological uncertainty, difficult site access, and complex civil engineering works such as tunnels and dams. Unexpected ground conditions during excavation can significantly increase costs and timelines. Seasonal flooding can also disrupt construction schedules if river diversion infrastructure is not adequately designed.",
+    "topic": "construction_risk",
+    "source": "World Bank – Hydropower Project Preparation Guide",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "World Bank",
+    "document_title": "Hydropower Project Preparation Guide"
+  },
+  {
+    "chunk_text": "Reliable hydropower feasibility assessments require long-term hydrological data, ideally spanning multiple decades. River flow measurements should capture seasonal variations, extreme flood events, and long-term climate patterns. Short data records may lead to inaccurate energy production forecasts and increased financial risk.",
+    "topic": "hydrology",
+    "source": "International Hydropower Association – Hydropower Sustainability Standard",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "International Hydropower Association",
+    "document_title": "Hydropower Sustainability Standard"
+  },
+  {
+    "chunk_text": "Environmental flow requirements mandate that a minimum volume of water remain in the river channel to sustain ecosystems and downstream communities. These requirements can reduce the amount of water available for electricity generation and must be incorporated into project design and generation estimates.",
+    "topic": "environmental_constraints",
+    "source": "European Environment Agency – Water Framework Directive Guidance",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "European Environment Agency",
+    "document_title": "Water Framework Directive Guidance"
+  },
+  {
+    "chunk_text": "Reservoirs created by hydroelectric dams can accumulate sediment transported by rivers. Over time this process, known as siltation, reduces water storage capacity and may affect long-term project performance. Effective reservoir management strategies include sediment flushing, dredging, and upstream watershed management.",
+    "topic": "reservoir_management",
+    "source": "World Bank – Hydropower Sustainability Guidelines",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "World Bank",
+    "document_title": "Hydropower Sustainability Guidelines"
+  },
+  {
+    "chunk_text": "Modern hydroelectric turbines can achieve efficiencies above 90 percent under optimal operating conditions. However, efficiency declines when turbines operate outside their design range for head and flow. Proper turbine selection and control systems are therefore critical for maintaining high efficiency across varying water conditions.",
+    "topic": "turbine_efficiency",
+    "source": "U.S. Department of Energy – Hydropower Basics",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "U.S. Department of Energy",
+    "document_title": "Hydropower Basics"
+  },
+  {
+    "chunk_text": "Hydropower plants generally have long operational lifetimes, often exceeding 50 years. Regular maintenance is required for turbines, generators, control systems, and dam infrastructure. Preventive maintenance programs reduce unplanned outages and extend equipment life.",
+    "topic": "operations_maintenance",
+    "source": "International Hydropower Association – Hydropower Sustainability Guidelines",
+    "domain": "energy",
+    "subdomain": "hydroelectric",
+    "persona": "technical",
+    "subpersona": "hydroelectric_power_specialist",
+    "source_type": "external_reference",
+    "source_name": "International Hydropower Association",
+    "document_title": "Hydropower Sustainability Guidelines"
+  }
+]

@@ -162,12 +162,13 @@ def _get_pinecone_indexes() -> Tuple[Any | None, Any | None]:
 
 def check_pinecone_connection() -> Dict[str, Any]:
     """
-    Check Pinecone API key and company index connection. Safe to call from health endpoint.
-    Returns dict with configured, company_index_ok, message, and optional error.
+    Check Pinecone API key and company/domain index connections. Safe to call from health endpoint.
+    Returns dict with configured, company_index_ok, domain_index_ok, message, and optional error.
     """
     out: Dict[str, Any] = {
         "configured": False,
         "company_index_ok": False,
+        "domain_index_ok": False,
         "message": "Pinecone not checked",
     }
     if Pinecone is None:
@@ -178,7 +179,7 @@ def check_pinecone_connection() -> Dict[str, Any]:
         out["message"] = "PINECONE_API_KEY not set or placeholder"
         return out
     out["configured"] = True
-    company_index, _ = _get_pinecone_indexes()
+    company_index, domain_index = _get_pinecone_indexes()
     if not company_index:
         out["message"] = "Company index unavailable (set PINECONE_COMPANY_INDEX_HOST or ensure index name exists)"
         return out
@@ -189,6 +190,12 @@ def check_pinecone_connection() -> Dict[str, Any]:
     except Exception as e:
         out["message"] = f"Index connection failed: {e}"
         out["error"] = str(e)
+    if domain_index:
+        try:
+            domain_index.describe_index_stats()
+            out["domain_index_ok"] = True
+        except Exception:
+            pass
     return out
 
 
@@ -613,4 +620,221 @@ def retrieve_chunks(
         )
 
     return shaped
+
+
+def retrieve_chunks_for_evaluation(
+    *,
+    project_id: str,
+    query: str,
+    persona_name: Optional[str] = None,
+    dimension_names: Optional[List[str]] = None,
+    top_k_company: int = 6,
+    top_k_domain: int = 4,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve company + domain chunks for decision evaluation.
+
+    - Company: queries di-company-knowledge-dev by project_id, optionally by persona.
+    - Domain: for each dimension in dimension_names, queries di-domain-knowledge-dev
+      with (persona_name, dimension), then merges and takes top_k_domain by score.
+    - Returns combined list with same shape as retrieve_chunks (chunk_text, title, source_type, ...).
+    """
+    project_id = (project_id or "").strip()
+    if not project_id or not query.strip():
+        return []
+
+    company_id = resolve_project_uuid(project_id) or project_id
+    dimension_names = dimension_names or []
+
+    client = _get_openai_client()
+    company_index, domain_index = _get_pinecone_indexes()
+    if not client or not company_index:
+        return []
+    if not domain_index:
+        logger.warning("Domain index not configured; only company RAG will be used.")
+
+    try:
+        dim = _get_embedding_dimension()
+        kwargs: Dict[str, Any] = {}
+        if dim is not None:
+            kwargs["dimensions"] = dim
+        emb = client.embeddings.create(model=EMBEDDING_MODEL, input=[query], **kwargs)
+        vector = (emb.data or [None])[0]
+        if not vector or not getattr(vector, "embedding", None):
+            return []
+        base_vec = vector.embedding
+    except Exception as e:  # pragma: no cover - external
+        logger.warning("Failed to embed query for retrieve_chunks_for_evaluation: %s", e)
+        return []
+
+    results: List[Tuple[float, Dict[str, Any]]] = []
+
+    # Company index
+    company_filter: Dict[str, Any] = {"company_id": company_id}
+    if persona_name:
+        company_filter["persona_tags"] = {"$in": [persona_name]}
+    try:
+        res = company_index.query(
+            vector=base_vec,
+            top_k=top_k_company,
+            include_metadata=True,
+            filter=company_filter,
+        )
+        matches = getattr(res, "matches", None) or getattr(res, "get", lambda *_: [])("matches")
+    except Exception as e:  # pragma: no cover - external
+        logger.warning("Pinecone company query failed in retrieve_chunks_for_evaluation: %s", e)
+        matches = []
+
+    for m in matches or []:
+        meta = getattr(m, "metadata", None) or getattr(m, "get", lambda *_: None)("metadata")
+        score = getattr(m, "score", None) or getattr(m, "get", lambda *_: 0.0)("score")
+        if isinstance(meta, dict):
+            results.append((float(score or 0.0), {**meta, "_scope": "company"}))
+
+    # Domain index: per-dimension queries (when dimension names match index) + persona-only query (for subpersonas / dimension mismatch)
+    if domain_index and persona_name:
+        domain_results: List[Tuple[float, Dict[str, Any]]] = []
+        if dimension_names:
+            per_dim = max(1, (top_k_domain + len(dimension_names) - 1) // len(dimension_names))
+            for dim_name in dimension_names:
+                if not (dim_name or "").strip():
+                    continue
+                domain_filter: Dict[str, Any] = {
+                    "scope": "domain",
+                    "persona": persona_name,
+                    "dimension": (dim_name or "").strip(),
+                }
+                try:
+                    res2 = domain_index.query(
+                        vector=base_vec,
+                        top_k=per_dim,
+                        include_metadata=True,
+                        filter=domain_filter,
+                    )
+                    matches2 = getattr(res2, "matches", None) or getattr(res2, "get", lambda *_: [])("matches")
+                except Exception as e:  # pragma: no cover - external
+                    logger.warning("Pinecone domain query failed for dimension %s: %s", dim_name, e)
+                    continue
+                for m in matches2 or []:
+                    meta = getattr(m, "metadata", None) or getattr(m, "get", lambda *_: None)("metadata")
+                    score = getattr(m, "score", None) or getattr(m, "get", lambda *_: 0.0)("score")
+                    if not isinstance(meta, dict):
+                        continue
+                    domain_results.append(
+                        (
+                            float(score or 0.0),
+                            {
+                                "scope": "domain",
+                                "chunk_text": meta.get("chunk_text") or "",
+                                "title": meta.get("source") or (dim_name or "").strip(),
+                                "source_type": "domain",
+                                "document_id": None,
+                                "chunk_id": None,
+                                "persona_tags": [meta.get("persona")] if meta.get("persona") else [],
+                                "dimension_tags": [meta.get("dimension")] if meta.get("dimension") else [],
+                            },
+                        )
+                    )
+        # Persona-only query: picks up domain chunks when dimension names in index don't match persona_dimensions (e.g. hydro subpersonas)
+        try:
+            persona_only_filter: Dict[str, Any] = {"scope": "domain", "persona": persona_name}
+            res_p = domain_index.query(
+                vector=base_vec,
+                top_k=top_k_domain,
+                include_metadata=True,
+                filter=persona_only_filter,
+            )
+            matches_p = getattr(res_p, "matches", None) or getattr(res_p, "get", lambda *_: [])("matches")
+            for m in matches_p or []:
+                meta = getattr(m, "metadata", None) or getattr(m, "get", lambda *_: None)("metadata")
+                score = getattr(m, "score", None) or getattr(m, "get", lambda *_: 0.0)("score")
+                if not isinstance(meta, dict):
+                    continue
+                domain_results.append(
+                    (
+                        float(score or 0.0),
+                        {
+                            "scope": "domain",
+                            "chunk_text": meta.get("chunk_text") or "",
+                            "title": meta.get("source") or "",
+                            "source_type": "domain",
+                            "document_id": None,
+                            "chunk_id": None,
+                            "persona_tags": [meta.get("persona")] if meta.get("persona") else [],
+                            "dimension_tags": [meta.get("dimension")] if meta.get("dimension") else [],
+                        },
+                    )
+                )
+        except Exception as e:  # pragma: no cover - external
+            logger.warning("Pinecone domain persona-only query failed: %s", e)
+        domain_results.sort(key=lambda x: x[0], reverse=True)
+        domain_slice = domain_results[:top_k_domain]
+    else:
+        domain_slice = []
+
+    # Reserve slots: top_k_company from company, top_k_domain from domain (so domain is not crowded out)
+    company_sorted = sorted(results, key=lambda x: x[0], reverse=True)
+    company_slice = company_sorted[:top_k_company]
+    combined = company_slice + domain_slice
+
+    shaped: List[Dict[str, Any]] = []
+    for score, meta in combined:
+        scope = meta.pop("_scope", None)
+        st = "company" if scope == "company" else (meta.get("source_type") or "domain")
+        shaped.append(
+            {
+                "chunk_text": meta.get("chunk_text") or "",
+                "document_id": meta.get("document_id"),
+                "chunk_id": meta.get("chunk_id"),
+                "page_number": meta.get("page_number"),
+                "score": score,
+                "title": meta.get("title") or "",
+                "source_type": st,
+                "persona_tags": meta.get("persona_tags") or [],
+                "dimension_tags": meta.get("dimension_tags") or [],
+            }
+        )
+    return shaped
+
+
+def format_chunks_for_citation(chunks: List[Dict[str, Any]]) -> str:
+    """
+    Format retrieved chunks as a single string with citation-ready labels
+    so the model can reference e.g. [Company | Doc Title | chunk 2] in its answer.
+    """
+    if not chunks:
+        return ""
+    lines: List[str] = []
+    for c in chunks:
+        title = (c.get("title") or "Document").strip() or "Document"
+        source_type = (c.get("source_type") or "company").strip().lower()
+        chunk_id = c.get("chunk_id")
+        text = (c.get("chunk_text") or "").strip()
+        if not text:
+            continue
+        if source_type == "domain":
+            label = f"[Domain | {title}]"
+        else:
+            chunk_part = f" | chunk {chunk_id}" if chunk_id is not None else ""
+            label = f"[Company | {title}{chunk_part}]"
+        lines.append(f"{label}\n{text}")
+    return "\n\n".join(lines)
+
+
+def get_chunk_labels(chunks: List[Dict[str, Any]]) -> List[str]:
+    """Return the list of citation labels for the given chunks (for display as references)."""
+    if not chunks:
+        return []
+    labels: List[str] = []
+    for c in chunks:
+        title = (c.get("title") or "Document").strip() or "Document"
+        source_type = (c.get("source_type") or "company").strip().lower()
+        chunk_id = c.get("chunk_id")
+        if source_type == "domain":
+            label = f"[Domain | {title}]"
+        else:
+            chunk_part = f" | chunk {chunk_id}" if chunk_id is not None else ""
+            label = f"[Company | {title}{chunk_part}]"
+        labels.append(label)
+    return labels
 

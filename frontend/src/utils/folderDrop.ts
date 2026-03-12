@@ -14,8 +14,8 @@ export interface FolderDropResult {
   files: DroppedFile[]
 }
 
-const ACCEPT_EXT = /\.(pdf|txt|md|docx?|pptx?)$/i
-const ACCEPT_TYPES = /^(text\/|application\/pdf|application\/vnd\.openxmlformats)/i
+const ACCEPT_EXT = /\.(pdf|txt|md|docx?|pptx?|png|jpe?g|webp|gif)$/i
+const ACCEPT_TYPES = /^(text\/|application\/pdf|application\/vnd\.openxmlformats|image\/(png|jpeg|jpg|webp|gif))/i
 
 function isAcceptedFile(file: File): boolean {
   return ACCEPT_EXT.test(file.name) || ACCEPT_TYPES.test(file.type || '')

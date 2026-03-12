@@ -43,6 +43,15 @@ SPECIALIST_ID_TO_PERSONA_NAME = {
     "legal": "Legal",
     "financial": "Financial",
     "technical": "Technical",
+    "hydroelectric": "Hydroelectric",
+    "hydroelectric_finance": "Hydroelectric Project Finance Specialist",
+    "hydroelectric_regulatory": "Hydroelectric Regulatory & Compliance Specialist",
     "bd": "Business Dev",
     "tax": "Tax",
 }
+
+# Reverse map: persona_name (as in decision_persona_scores) -> specialist_id
+PERSONA_NAME_TO_SPECIALIST_ID = {v: k for k, v in SPECIALIST_ID_TO_PERSONA_NAME.items()}
+# Display name "Business Development" also maps to bd
+PERSONA_NAME_TO_SPECIALIST_ID["Business Development"] = "bd"
+PERSONA_NAME_TO_SPECIALIST_ID["Hydroelectric"] = "hydroelectric"

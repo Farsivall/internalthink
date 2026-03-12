@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from app.schemas.chat import ChatRequest, ChatResponse, SpecialistResponse
 from app.personas import SPECIALISTS
 from app.services.context import get_context_for_project
+from app.services.persona import get_dimensions_grouped_by_persona
 from app.engine.decisions import evaluate_all_specialists, evaluate_all_specialists_for_decision_call
 from app.api.deps import require_supabase
 from app.db.project_resolve import resolve_project_uuid
@@ -49,6 +50,7 @@ async def chat(request: ChatRequest):
 
     supabase = require_supabase()
     sources = get_context_for_project(request.project_id)
+    dimensions_by_persona = get_dimensions_grouped_by_persona(supabase)
 
     # If a decision_id is provided, treat this as a decision-focused "call"
     # where specialists only use decision data + main project docs.
@@ -76,9 +78,16 @@ async def chat(request: ChatRequest):
             decision_row=decision_row,
             sources=sources,
             specialist_ids=request.specialist_ids,
+            dimensions_by_persona=dimensions_by_persona,
         )
     else:
-        responses = await evaluate_all_specialists(request.message, sources, request.specialist_ids)
+        responses = await evaluate_all_specialists(
+            request.message,
+            sources,
+            request.specialist_ids,
+            project_id=request.project_id,
+            dimensions_by_persona=dimensions_by_persona,
+        )
 
     try:
         project_uuid = resolve_project_uuid(request.project_id)

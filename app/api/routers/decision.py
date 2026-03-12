@@ -15,6 +15,7 @@ from app.schemas.decision import (
     SpecialistScore,
     DecisionPersonaScoreDetail,
     DimensionScoreDetail,
+    CitationItem,
 )
 from app.engine.decision import (
     evaluate_specialist,
@@ -24,6 +25,7 @@ from app.engine.decision import (
 from app.personas import SPECIALISTS
 from app.personas.definitions import filter_context_for_specialist
 from app.services.context import get_context_for_project
+from app.services.rag import retrieve_chunks_for_evaluation, format_chunks_for_citation, get_chunk_labels
 from app.services.persona import (
     get_dimensions_grouped_by_persona,
     SPECIALIST_ID_TO_PERSONA_NAME,
@@ -71,7 +73,13 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         (str(s.get("label") or s.get("file_name") or "Document")).strip() or "Document"
         for s in sources
     ]
-    specialist_ids = list(SPECIALISTS.keys())
+    DEFAULT_SPECIALISTS = ["legal", "financial", "technical", "bd", "tax"]
+    specialist_ids = body.specialist_ids if body.specialist_ids else DEFAULT_SPECIALISTS
+    for sid in specialist_ids:
+        if sid not in SPECIALISTS:
+            raise HTTPException(status_code=400, detail=f"Unknown specialist: {sid}")
+    if not specialist_ids:
+        raise HTTPException(status_code=400, detail="At least one specialist required for evaluation")
 
     # Load scoring matrix from Supabase (persona_dimensions) for each persona
     dimensions_by_persona: dict[str, list] = {}
@@ -91,11 +99,29 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         desc = description + extra
         persona_name = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, SPECIALISTS[sid].name)
         dimensions = dimensions_by_persona.get(persona_name) or []
+        # RAG: retrieve company + domain chunks for citation-grounded evaluation
+        query = f"{title}\n{description}"[:800]
+        try:
+            chunks = retrieve_chunks_for_evaluation(
+                project_id=project_id,
+                query=query,
+                persona_name=persona_name,
+                dimension_names=[(d.get("dimension_name") or "").strip() for d in dimensions if (d.get("dimension_name") or "").strip()],
+                top_k_company=6,
+                top_k_domain=4,
+            )
+            rag_citation_context_str = format_chunks_for_citation(chunks)
+            evidence_labels = get_chunk_labels(chunks)
+        except Exception as e:
+            logger.warning("RAG retrieval failed for specialist %s: %s", sid, e)
+            rag_citation_context_str = ""
+            evidence_labels = []
         result = evaluate_specialist(
             sid, title, desc, context_str, dimensions=dimensions,
             has_attached_documents=has_attached_documents,
+            rag_citation_context=rag_citation_context_str,
         )
-        return (sid, SPECIALISTS[sid].name, persona_name, result)
+        return (sid, SPECIALISTS[sid].name, persona_name, result, evidence_labels)
 
     try:
         loop = asyncio.get_running_loop()
@@ -125,9 +151,11 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                     objections=[],
                 )
             )
-            outputs_for_synthesis.append((sid, name, 5, scores[-1].summary, []))
+            outputs_for_synthesis.append((sid, name, 5, scores[-1].summary, [], None))
         else:
-            _sid, _name, persona_name, (score, summary, objections, persona_detail) = r
+            _sid, _name, persona_name, result, evidence_labels = r
+            score, summary, objections, persona_detail, citations = result
+            score_100 = int(persona_detail.get("total_score", score * 10)) if isinstance(persona_detail, dict) else (score * 10)
             scores.append(
                 SpecialistScore(
                     specialist_id=sid,
@@ -135,13 +163,15 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                     score=score,
                     summary=summary,
                     objections=objections,
+                    citations=citations,
+                    sources_used=evidence_labels if evidence_labels else None,
                 )
             )
-            outputs_for_synthesis.append((sid, name, score, summary, objections))
+            outputs_for_synthesis.append((sid, name, score, summary, objections, score_100))
             if persona_detail and persona_name:
                 persona_details.append((persona_name, persona_detail))
 
-    agreement, tradeoffs = synthesize_agreement_and_tradeoffs(title, outputs_for_synthesis)
+    agreement, tradeoffs, core_tensions = synthesize_agreement_and_tradeoffs(title, outputs_for_synthesis)
 
     decision_id: str | None = None
     synthesis_result: dict | None = None
@@ -150,6 +180,17 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
     response_persona_scores: list[DecisionPersonaScoreDetail] = []
     for pname, detail in persona_details:
         dims = detail.get("dimensions") or []
+        raw_citations = detail.get("citations") or []
+        citations_list = None
+        if raw_citations and isinstance(raw_citations, list):
+            citations_list = [
+                CitationItem(
+                    claim_or_section=str(c.get("claim_or_section") or c.get("claim") or ""),
+                    source_label=str(c.get("source_label") or c.get("source") or ""),
+                    snippet_or_quote=str(c.get("snippet_or_quote") or c.get("snippet") or ""),
+                )
+                for c in raw_citations if isinstance(c, dict)
+            ]
         response_persona_scores.append(
             DecisionPersonaScoreDetail(
                 persona_name=pname,
@@ -166,6 +207,7 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 ],
                 what_would_change_my_mind=list(detail.get("what_would_change_my_mind") or []),
                 high_structural_risk=bool(detail.get("high_structural_risk", False)),
+                citations=citations_list,
             )
         )
 
@@ -178,23 +220,33 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         s = scores[i]
         if detail is not None:
             total = int(detail.get("total_score", 50))
-            specialist_responses_payload.append({
+            payload = {
                 "specialist_id": sid,
                 "specialist_name": s.specialist_name,
                 "score_0_100": total,
                 "score_raw": max(1, min(10, round(total / 10))),
                 "summary": s.summary,
                 "objections": s.objections,
-            })
+            }
+            if s.sources_used:
+                payload["sources_used"] = s.sources_used
+            if s.citations:
+                payload["citations"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in s.citations]
+            specialist_responses_payload.append(payload)
         else:
-            specialist_responses_payload.append({
+            payload = {
                 "specialist_id": s.specialist_id,
                 "specialist_name": s.specialist_name,
                 "score_0_100": s.score * 10,
                 "score_raw": s.score,
                 "summary": s.summary,
                 "objections": s.objections,
-            })
+            }
+            if s.sources_used:
+                payload["sources_used"] = s.sources_used
+            if s.citations:
+                payload["citations"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in s.citations]
+            specialist_responses_payload.append(payload)
 
     # Persist decision to Supabase decisions table (best-effort; errors are logged but do not break the API).
     try:
@@ -209,6 +261,7 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 "agreement": agreement,
                 "tradeoffs": tradeoffs,
                 "attached_labels": attached_labels,
+                "core_tensions": core_tensions,
             }),
             "decision_synthesis": json.dumps({}),  # populated by synthesis stage (decision_tree.md)
         }
@@ -280,7 +333,7 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         persona_scores=response_persona_scores,
         attached_labels=attached_labels,
         decision_summary=synthesis_result.get("decision_summary") if synthesis_result else None,
-        core_tensions=synthesis_result.get("core_tensions") if synthesis_result else None,
+        core_tensions=core_tensions if core_tensions else (synthesis_result.get("core_tensions") if synthesis_result else None),
         paths=synthesis_result.get("paths") if synthesis_result else None,
         path_ranking=synthesis_result.get("path_ranking") if synthesis_result else None,
         recommended_path=synthesis_result.get("recommended_path") if synthesis_result else None,
@@ -330,6 +383,7 @@ def get_decision(decision_id: str):
         attached_labels = conflict.get("attached_labels")
         if attached_labels is not None and not isinstance(attached_labels, list):
             attached_labels = None
+        stored_core_tensions = conflict.get("core_tensions") or []
 
         # Parse decision_synthesis JSONB for new output structure (decision_tree.md)
         synthesis_raw = row.get("decision_synthesis") or {}
@@ -354,6 +408,10 @@ def get_decision(decision_id: str):
                 resp = by_specialist_id.get(sid, {}) if sid else {}
                 # Scores list derived from decision_persona_scores (total_score 0–100); summary/objections from specialist_responses
                 score_1_10 = max(1, min(10, round(total_score / 10))) if total_score else 5
+                raw_cites = resp.get("citations") or []
+                citations_list = [CitationItem(**c) for c in raw_cites if isinstance(c, dict)] if raw_cites else None
+                if citations_list is not None and not citations_list:
+                    citations_list = None
                 scores.append(
                     SpecialistScore(
                         specialist_id=sid or "",
@@ -361,6 +419,8 @@ def get_decision(decision_id: str):
                         score=score_1_10,
                         summary=resp.get("summary", ""),
                         objections=resp.get("objections") or [],
+                        citations=citations_list,
+                        sources_used=resp.get("sources_used"),
                     )
                 )
                 dims_raw = ps_row.get("dimensions") or []
@@ -407,6 +467,10 @@ def get_decision(decision_id: str):
                     score = max(1, min(10, int(round(score_0_100 / 10))))
                 else:
                     score = 5
+                raw_cites = item.get("citations") or []
+                citations_list = [CitationItem(**c) for c in raw_cites if isinstance(c, dict)] if raw_cites else None
+                if citations_list is not None and not citations_list:
+                    citations_list = None
                 scores.append(
                     SpecialistScore(
                         specialist_id=item.get("specialist_id", ""),
@@ -414,6 +478,8 @@ def get_decision(decision_id: str):
                         score=score,
                         summary=item.get("summary", ""),
                         objections=item.get("objections") or [],
+                        citations=citations_list,
+                        sources_used=item.get("sources_used"),
                     )
                 )
 
@@ -426,7 +492,7 @@ def get_decision(decision_id: str):
             persona_scores=persona_scores,
             attached_labels=attached_labels,
             decision_summary=synthesis.get("decision_summary"),
-            core_tensions=synthesis.get("core_tensions"),
+            core_tensions=stored_core_tensions if stored_core_tensions else synthesis.get("core_tensions"),
             paths=synthesis.get("paths"),
             path_ranking=synthesis.get("path_ranking"),
             recommended_path=synthesis.get("recommended_path"),

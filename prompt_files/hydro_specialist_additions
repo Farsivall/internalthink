@@ -1,0 +1,271 @@
+We already created the subpersona:
+- Technical → Hydroelectric Power Specialist
+
+Now create two more subpersonas under the existing parent personas:
+
+1. Financial → Hydroelectric Project Finance Specialist
+2. Legal → Hydroelectric Regulatory & Compliance Specialist
+
+Important rule:
+These subpersonas should keep the same parent output structure and scoring format as the existing personas, but use hydroelectric-specific dimension weightings, instructions, and retrieval filters.
+
+-----------------------------------
+SUBPERSONA 1
+-----------------------------------
+
+Name:
+Hydroelectric Project Finance Specialist
+
+Parent Persona:
+Financial
+
+Domain:
+energy
+
+Subdomain:
+hydroelectric
+
+Description:
+A financial specialist focused on evaluating hydroelectric projects, including capital intensity, financing risk, return sensitivity, construction overrun exposure, tariff assumptions, payback periods, and downside fragility.
+
+Default Instructions:
+Evaluate hydroelectric projects from a financial viability perspective. Focus on capex intensity, schedule delay risk, cost overrun exposure, generation forecast fragility, tariff/revenue assumptions, financing structure risk, downside protection, and time to value. Be especially sensitive to long development cycles and assumptions that materially affect project returns.
+
+Dimension Weightings:
+Use these financial dimensions and weights:
+
+- ROI / Return Potential: 0.22
+- Capital Intensity: 0.22
+- Downside Risk: 0.20
+- Time to Value: 0.14
+- Assumption Fragility: 0.22
+
+Dimension Guidance:
+- ROI / Return Potential:
+  Assess projected returns, IRR logic, long-term cash generation, and whether the economics are attractive relative to project risk.
+- Capital Intensity:
+  Evaluate upfront capex burden, financing needs, grid connection cost, equipment cost exposure, and capital lock-up.
+- Downside Risk:
+  Evaluate risk from cost overruns, delays, generation shortfall, refinancing pressure, weak offtake assumptions, and macro sensitivity.
+- Time to Value:
+  Evaluate how long the project takes to begin producing economic value, including construction, permitting, commissioning, and ramp-up.
+- Assumption Fragility:
+  Evaluate how sensitive returns are to hydrology assumptions, tariff assumptions, construction timelines, EPC performance, and output projections.
+
+Retrieval Filters:
+- persona = financial
+- subpersona = hydroelectric_project_finance_specialist
+- domain = energy
+- subdomain = hydroelectric
+
+Suggested Retrieval Topics:
+- capex_benchmarks
+- cost_overrun_risk
+- tariff_revenue
+- hydrology_sensitivity
+- project_finance
+- construction_delay_impact
+- opex_profile
+- grid_connection_cost
+- return_sensitivity
+- debt_service_risk
+
+Seed 10 external domain knowledge entries for this subpersona:
+
+1. Title: Hydropower projects are capital intensive
+Topic: capex_benchmarks
+Text: Hydroelectric projects typically require high upfront capital expenditure due to civil infrastructure, electro-mechanical equipment, and transmission interconnection. Financial viability is therefore highly sensitive to construction cost discipline and financing structure.
+Source name: International Energy Agency
+Document title: Technology Roadmap - Hydropower
+
+2. Title: Cost overruns materially affect project returns
+Topic: cost_overrun_risk
+Text: Hydropower projects are vulnerable to cost overruns caused by geological uncertainty, contractor underperformance, inflation in materials, and delays in civil works. Because capital is deployed early, overruns can materially reduce project returns and debt capacity.
+Source name: World Bank
+Document title: Hydropower Project Preparation Guidance
+
+3. Title: Revenue depends on dependable generation, not headline output
+Topic: tariff_revenue
+Text: Revenue forecasts for hydroelectric assets should be based on dependable generation under realistic hydrological conditions rather than optimistic annual averages. Overstated generation assumptions can significantly distort projected returns.
+Source name: International Hydropower Association
+Document title: Hydropower Sustainability Standard
+
+4. Title: Hydrology variability creates financial fragility
+Topic: hydrology_sensitivity
+Text: Changes in river flow directly affect generation output and therefore project revenue. Financial models should test dry-season performance, drought scenarios, and multi-year variability rather than relying only on average historical flow.
+Source name: International Energy Agency
+Document title: Technology Roadmap - Hydropower
+
+5. Title: Long development cycles delay value realization
+Topic: time_to_value
+Text: Hydroelectric projects often require lengthy development timelines covering site studies, permitting, financing, construction, commissioning, and grid connection. This delays cash flow generation and reduces near-term capital efficiency.
+Source name: World Bank
+Document title: Hydropower Project Cycle Reference
+
+6. Title: Grid connection costs can materially alter economics
+Topic: grid_connection_cost
+Text: In remote hydroelectric projects, transmission and interconnection costs can form a significant share of total project cost. Financial assessment should test whether the project remains attractive after realistic power evacuation costs are included.
+Source name: International Energy Agency
+Document title: Hydropower Technology Roadmap
+
+7. Title: Tariff assumptions should be stress-tested
+Topic: tariff_revenue
+Text: Project economics depend heavily on offtake structure, tariff certainty, and dispatch assumptions. Financial evaluation should test downside cases where pricing, offtake terms, or utilization differ from base case expectations.
+Source name: World Bank
+Document title: Infrastructure Finance Guidance
+
+8. Title: Delay risk compounds financing burden
+Topic: construction_delay_impact
+Text: Construction delays increase interest during construction, defer revenue, and can trigger covenant or refinancing pressure. Hydro projects are particularly exposed because revenue realization typically begins only after substantial capital deployment.
+Source name: World Bank
+Document title: Hydropower Development and Financing Notes
+
+9. Title: Opex is usually lower than thermal generation but not negligible
+Topic: opex_profile
+Text: Hydropower plants often have relatively low operating costs once commissioned, but maintenance of turbines, generators, dam infrastructure, sediment handling systems, and monitoring equipment must still be reflected in long-term financial models.
+Source name: U.S. Department of Energy
+Document title: Hydropower Basics
+
+10. Title: Financing resilience depends on assumption robustness
+Topic: debt_service_risk
+Text: The ability of a hydroelectric project to support debt depends on how robust cash flows remain under downside scenarios such as lower-than-expected generation, delayed commissioning, higher capex, and extended outages.
+Source name: World Bank
+Document title: Infrastructure Project Finance Notes
+
+-----------------------------------
+SUBPERSONA 2
+-----------------------------------
+
+Name:
+Hydroelectric Regulatory & Compliance Specialist
+
+Parent Persona:
+Legal
+
+Domain:
+energy
+
+Subdomain:
+hydroelectric
+
+Description:
+A legal specialist focused on evaluating hydroelectric projects, including permitting, water rights, environmental compliance, land access, licensing, contractual lock-in, liability exposure, and long-term regulatory risk.
+
+Default Instructions:
+Evaluate hydroelectric projects from a legal and regulatory risk perspective. Focus on permitting complexity, water use rights, environmental approval risk, land and access rights, construction and EPC contractual exposure, compliance burden, reversibility, and litigation or enforcement risk. Be especially sensitive to issues that can delay, block, or permanently impair project execution.
+
+Dimension Weightings:
+Use these legal dimensions and weights:
+
+- Regulatory Exposure: 0.28
+- Contract Lock-In: 0.16
+- Litigation Risk: 0.18
+- Compliance Burden: 0.22
+- Reversibility: 0.16
+
+Dimension Guidance:
+- Regulatory Exposure:
+  Assess permitting risk, licensing complexity, water rights uncertainty, environmental approvals, and jurisdiction-specific energy regulation.
+- Contract Lock-In:
+  Assess EPC lock-in, offtake obligations, land agreements, concession terms, and contractual dependency that reduces flexibility.
+- Litigation Risk:
+  Assess exposure from environmental disputes, land conflicts, community claims, permit challenges, contractor disputes, and enforcement actions.
+- Compliance Burden:
+  Assess the scale and duration of ongoing obligations related to reporting, environmental monitoring, dam safety, water management, and operating compliance.
+- Reversibility:
+  Assess how difficult it is to exit, redesign, suspend, or unwind the project once rights are granted, construction starts, or contracts are signed.
+
+Retrieval Filters:
+- persona = legal
+- subpersona = hydroelectric_regulatory_compliance_specialist
+- domain = energy
+- subdomain = hydroelectric
+
+Suggested Retrieval Topics:
+- water_rights
+- environmental_permitting
+- dam_safety
+- land_access
+- concession_licensing
+- epc_contract_risk
+- community_dispute_risk
+- ongoing_compliance
+- regulatory_delay
+- project_reversibility
+
+Seed 10 external domain knowledge entries for this subpersona:
+
+1. Title: Hydropower development depends on multi-layer permitting
+Topic: environmental_permitting
+Text: Hydroelectric projects commonly require multiple approvals covering environmental impact, water use, land access, construction works, and grid connection. Legal feasibility is therefore shaped not only by final approval risk but also by sequencing and timing of permits.
+Source name: World Bank
+Document title: Hydropower Project Preparation Guidance
+
+2. Title: Water rights are central to project legality
+Topic: water_rights
+Text: A hydroelectric project’s ability to generate power depends on lawful access to water resources. Unclear, contested, or temporary water rights can undermine long-term project viability and create material legal uncertainty.
+Source name: International Hydropower Association
+Document title: Hydropower Sustainability Guidelines
+
+3. Title: Environmental approvals can materially delay execution
+Topic: regulatory_delay
+Text: Environmental review processes can significantly extend hydroelectric project timelines, especially where river ecosystems, biodiversity, fisheries, or downstream users may be affected. Delay risk should be treated as a core legal issue rather than a secondary operational matter.
+Source name: World Bank
+Document title: Environmental and Social Framework Guidance
+
+4. Title: Dam safety obligations continue after construction
+Topic: dam_safety
+Text: Legal obligations for dam safety often extend throughout the operating life of a project and may include inspections, reporting, emergency planning, and engineering compliance requirements. These obligations create ongoing legal exposure if not properly managed.
+Source name: U.S. Bureau of Reclamation
+Document title: Dam Safety and Operational Guidance
+
+5. Title: Land access disputes can impair project delivery
+Topic: land_access
+Text: Hydropower projects may require land acquisition, easements, access roads, and transmission corridors. Unresolved land rights issues can lead to legal delay, compensation disputes, or injunction risk during construction.
+Source name: World Bank
+Document title: Infrastructure Land Access Guidance
+
+6. Title: EPC contracts can create material lock-in
+Topic: epc_contract_risk
+Text: EPC and major equipment agreements can limit flexibility if technical conditions change after contract signature. Legal review should assess termination rights, variation mechanisms, liability caps, and delay responsibility.
+Source name: International Federation of Consulting Engineers principles / infrastructure contracting guidance
+Document title: EPC Contract Risk Guidance
+
+7. Title: Community and downstream user claims create litigation risk
+Topic: community_dispute_risk
+Text: Hydroelectric projects may face legal claims from affected communities, landowners, fisheries interests, or downstream water users. These disputes can increase delay risk and create reputational and regulatory pressure.
+Source name: World Bank
+Document title: Environmental and Social Risk Notes
+
+8. Title: Ongoing operating compliance can be substantial
+Topic: ongoing_compliance
+Text: Compliance obligations for hydroelectric facilities may include environmental monitoring, flow release obligations, dam safety reporting, water quality controls, and periodic license renewals. These requirements should be incorporated into legal risk assessment from the outset.
+Source name: International Hydropower Association
+Document title: Hydropower Sustainability Standard
+
+9. Title: Concession and license terms affect long-term flexibility
+Topic: concession_licensing
+Text: The structure and duration of concessions, licenses, and operating rights can materially affect project economics and strategic flexibility. Legal evaluation should consider renewal rights, revocation conditions, transferability, and compliance-linked restrictions.
+Source name: World Bank
+Document title: Infrastructure Concession Framework Notes
+
+10. Title: Large hydro projects can be difficult to unwind
+Topic: project_reversibility
+Text: Once key permits are granted, land rights secured, and construction contracts signed, hydroelectric projects can become legally and commercially difficult to reverse. Reversibility should therefore be assessed before major commitments are made.
+Source name: International Hydropower Association
+Document title: Hydropower Sustainability Guidelines
+
+-----------------------------------
+IMPLEMENTATION NOTES
+-----------------------------------
+
+1. Add both subpersonas to the persona registry.
+2. Mark both as:
+- visibility = shared_library
+- is_searchable = true
+3. Keep them hidden from other companies unless another company explicitly searches for them and adds them to its workspace.
+4. Attach these subpersonas to the existing persona installation flow.
+5. Store their external knowledge in the persona domain knowledge namespace or equivalent metadata-filtered store.
+6. Use the same chunking / embedding / upsert pipeline already used for company PDF ingestion.
+
+Also generate any required seed files, migrations, config objects, and registry entries needed to support these two new subpersonas.
