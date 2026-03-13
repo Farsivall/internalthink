@@ -18,28 +18,120 @@ def strip_null_bytes(s: str) -> str:
     return s.replace("\x00", "")
 
 
+MIN_TEXT_CHARS_PER_PAGE = 50
+
+
+def _render_pdf_page_as_png(file_bytes: bytes, page_index: int) -> bytes | None:
+    """Render a single PDF page as a PNG using PyMuPDF. Returns PNG bytes or None."""
+    try:
+        import fitz
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        if page_index >= len(doc):
+            return None
+        page = doc[page_index]
+        pix = page.get_pixmap(dpi=200)
+        png_bytes = pix.tobytes("png")
+        doc.close()
+        return png_bytes
+    except ImportError:
+        logger.debug("PyMuPDF not installed; cannot render PDF page as image.")
+        return None
+    except Exception as e:
+        logger.warning("Failed to render PDF page %d as image: %s", page_index, e)
+        return None
+
+
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF file.
 
-    Raises ValueError if the PDF contains no extractable text
-    (e.g. scanned image PDFs).
+    For pages with little or no text (scanned pages, charts, diagrams),
+    renders the page as an image and uses Vision OCR to extract content.
     """
     reader = PdfReader(BytesIO(file_bytes))
-    pages = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            pages.append(text)
+    pages: list[str] = []
 
-    full_text = "\n".join(pages).strip()
+    vision_pages_to_process: list[int] = []
+
+    for i, page in enumerate(reader.pages):
+        text = (page.extract_text() or "").strip()
+        if len(text) >= MIN_TEXT_CHARS_PER_PAGE:
+            pages.append(text)
+        else:
+            vision_pages_to_process.append(i)
+            if text:
+                pages.append(text)
+            else:
+                pages.append("")
+
+    if vision_pages_to_process:
+        for page_idx in vision_pages_to_process:
+            png_bytes = _render_pdf_page_as_png(file_bytes, page_idx)
+            if not png_bytes:
+                continue
+            if len(png_bytes) > IMAGE_EXTRACTION_MAX_BYTES:
+                logger.info("Skipping PDF page %d: rendered image too large for Vision.", page_idx)
+                continue
+            try:
+                ocr_text = _extract_pdf_page_content(png_bytes)
+                if ocr_text and ocr_text.strip():
+                    existing = pages[page_idx] if page_idx < len(pages) else ""
+                    if existing:
+                        pages[page_idx] = existing + "\n\n" + ocr_text.strip()
+                    else:
+                        pages[page_idx] = ocr_text.strip()
+            except Exception as e:
+                logger.warning("Vision OCR failed for PDF page %d: %s", page_idx, e)
+
+    full_text = "\n".join(p for p in pages if p).strip()
 
     if not full_text:
         raise ValueError(
-            "Could not extract text from this PDF. "
-            "It may be a scanned image. Please paste the content manually instead."
+            "Could not extract any text from this PDF, even with image analysis. "
+            "The file may be corrupted or contain no readable content."
         )
 
     return full_text
+
+
+def _extract_pdf_page_content(png_bytes: bytes) -> str:
+    """Send a rendered PDF page image to Vision with a prompt that captures both text and visual content."""
+    client = _get_openai_client()
+    if not client:
+        raise ValueError("OpenAI API key not configured; cannot analyse PDF page image.")
+    b64 = base64.standard_b64encode(png_bytes).decode("ascii")
+    data_uri = f"data:image/png;base64,{b64}"
+    try:
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                        {
+                            "type": "text",
+                            "text": (
+                                "This is a page from a PDF document. Extract and describe ALL content:\n"
+                                "1. Extract all visible text, preserving structure (headings, lists, tables).\n"
+                                "2. For charts, graphs, or diagrams: describe what they show, including axis labels, "
+                                "data points, trends, and key takeaways.\n"
+                                "3. For tables: reproduce the data in a readable text format.\n"
+                                "4. For maps or technical drawings: describe the key elements and any labels.\n"
+                                "Output plain text only. Be thorough — this content will be used for decision analysis."
+                            ),
+                        },
+                    ],
+                }
+            ],
+            max_tokens=4096,
+        )
+    except Exception as e:
+        logger.warning("Vision failed for PDF page analysis: %s", e)
+        raise
+    text = r.choices or []
+    if not text:
+        return ""
+    return (getattr(text[0].message, "content", None) or "").strip()
 
 
 def _get_openai_client():
