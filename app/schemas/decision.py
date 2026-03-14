@@ -64,7 +64,7 @@ class DecisionEvaluateResponse(BaseModel):
     attached_labels: list[str] | None = None
     # From decision_synthesis JSONB (decision_tree.md output structure)
     decision_summary: str | None = None
-    core_tensions: list[str] | None = None
+    core_tensions: list | None = None
     paths: list[dict] | None = None
     path_ranking: list[dict] | None = None
     recommended_path: dict | None = None

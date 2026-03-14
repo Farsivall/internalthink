@@ -36,7 +36,7 @@ export interface DecisionPersonaScoreDetail {
 /** Synthesis fields from decision_tree.md (stored in decision_synthesis JSONB) */
 export interface DecisionSynthesis {
   decision_summary?: string | null
-  core_tensions?: string[] | null
+  core_tensions?: Array<string | { title: string; explanation: string }> | null
   paths?: Array<{
     id: string
     title: string
@@ -89,7 +89,7 @@ export interface DecisionEvaluateResponse {
   attached_labels?: string[] | null
   /** From decision_synthesis JSONB */
   decision_summary?: string | null
-  core_tensions?: string[] | null
+  core_tensions?: Array<string | { title: string; explanation: string }> | null
   paths?: DecisionSynthesis['paths']
   path_ranking?: DecisionSynthesis['path_ranking']
   recommended_path?: DecisionSynthesis['recommended_path']

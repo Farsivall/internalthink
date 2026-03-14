@@ -5,6 +5,7 @@ Decision evaluation API — submit a decision, get specialist scores, agreement,
 import asyncio
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, HTTPException
@@ -171,12 +172,12 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
             if persona_detail and persona_name:
                 persona_details.append((persona_name, persona_detail))
 
-    agreement, tradeoffs, core_tensions = synthesize_agreement_and_tradeoffs(title, outputs_for_synthesis)
+    # Run agreement/tradeoffs synthesis in background thread while we build response data
+    synthesis_future = executor.submit(synthesize_agreement_and_tradeoffs, title, outputs_for_synthesis)
 
     decision_id: str | None = None
-    synthesis_result: dict | None = None
 
-    # Response persona_scores from persona_details (always available for response)
+    # Response persona_scores from persona_details (built while synthesis runs)
     response_persona_scores: list[DecisionPersonaScoreDetail] = []
     for pname, detail in persona_details:
         dims = detail.get("dimensions") or []
@@ -211,7 +212,7 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
             )
         )
 
-    # Build specialist_responses from decision_persona_scores (persona_details) so DB stays in sync
+    # Build specialist_responses payload while synthesis runs in background
     persona_details_by_name = {pname: detail for pname, detail in persona_details}
     specialist_responses_payload = []
     for i, sid in enumerate(specialist_ids):
@@ -228,11 +229,6 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 "summary": s.summary,
                 "objections": s.objections,
             }
-            if s.sources_used:
-                payload["sources_used"] = s.sources_used
-            if s.citations:
-                payload["citations"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in s.citations]
-            specialist_responses_payload.append(payload)
         else:
             payload = {
                 "specialist_id": s.specialist_id,
@@ -242,13 +238,20 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 "summary": s.summary,
                 "objections": s.objections,
             }
-            if s.sources_used:
-                payload["sources_used"] = s.sources_used
-            if s.citations:
-                payload["citations"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in s.citations]
-            specialist_responses_payload.append(payload)
+        if s.sources_used:
+            payload["sources_used"] = s.sources_used
+        if s.citations:
+            payload["citations"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in s.citations]
+        specialist_responses_payload.append(payload)
 
-    # Persist decision to Supabase decisions table (best-effort; errors are logged but do not break the API).
+    # Wait for agreement/tradeoffs/core_tensions (was running in parallel with payload build above)
+    try:
+        agreement, tradeoffs, core_tensions = synthesis_future.result(timeout=60)
+    except Exception as e:
+        logger.warning("Agreement/tradeoffs synthesis failed: %s", e)
+        agreement, tradeoffs, core_tensions = "Synthesis unavailable.", "—", []
+
+    # Persist decision to Supabase (best-effort; errors logged but don't break the API)
     try:
         supabase = require_supabase()
         pid = resolve_project_uuid(project_id) or project_id
@@ -263,7 +266,7 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 "attached_labels": attached_labels,
                 "core_tensions": core_tensions,
             }),
-            "decision_synthesis": json.dumps({}),  # populated by synthesis stage (decision_tree.md)
+            "decision_synthesis": json.dumps({}),
         }
         if body.parent_id:
             insert_payload["parent_id"] = body.parent_id
@@ -271,7 +274,6 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         data = (result.data or [])
         if data:
             decision_id = str(data[0].get("id"))
-            # Persist persona scoring matrix results (decision_persona_scores)
             for pname, detail in persona_details:
                 try:
                     supabase.table("decision_persona_scores").insert({
@@ -285,7 +287,19 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 except Exception as score_err:
                     logger.warning("Failed to save persona score for %s: %s", pname, score_err)
 
-            # Decision synthesis (decision_tree.md): score -> consensus/tradeoffs -> paths, ranking, next steps
+            try:
+                supabase.table("project_chat_messages").insert({
+                    "project_id": pid,
+                    "sender": "decision",
+                    "text": title,
+                    "decision_id": decision_id,
+                }).execute()
+            except Exception as chat_err:
+                logger.warning("Failed to save decision chat message for project %s: %s", project_id, chat_err)
+
+            # Fire-and-forget: run decision tree synthesis in a background thread
+            # so the user gets scores + agreement/tradeoffs immediately.
+            _decision_id = decision_id
             summary_by_persona = {}
             for i, sid in enumerate(specialist_ids):
                 pname = SPECIALIST_ID_TO_PERSONA_NAME.get(sid, SPECIALISTS[sid].name)
@@ -299,32 +313,23 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
                 )
                 for pname, detail in persona_details
             ]
-            synthesis_result = synthesize_decision_tree(title, description, agreement, tradeoffs, persona_outputs)
-            if synthesis_result:
-                try:
-                    supabase.table("decisions").update({
-                        "decision_synthesis": json.dumps(synthesis_result),
-                    }).eq("id", decision_id).execute()
-                except Exception as syn_err:
-                    logger.warning("Failed to persist decision_synthesis for %s: %s", decision_id, syn_err)
-        else:
-            synthesis_result = None
 
-        # Also record a decision bubble in project chat so it appears in history (inside try for decision_id)
-        if data:
-            try:
-                supabase.table("project_chat_messages").insert({
-                    "project_id": pid,
-                    "sender": "decision",
-                    "text": title,
-                    "decision_id": decision_id,
-                }).execute()
-            except Exception as chat_err:
-                logger.warning("Failed to save decision chat message for project %s: %s", project_id, chat_err)
+            def _bg_synthesize():
+                try:
+                    syn = synthesize_decision_tree(title, description, agreement, tradeoffs, persona_outputs)
+                    if syn:
+                        sb = require_supabase()
+                        sb.table("decisions").update({
+                            "decision_synthesis": json.dumps(syn),
+                        }).eq("id", _decision_id).execute()
+                except Exception as e:
+                    logger.warning("Background decision_synthesis failed for %s: %s", _decision_id, e)
+
+            threading.Thread(target=_bg_synthesize, daemon=True).start()
     except Exception as e:
         logger.warning("Failed to persist decision for project %s: %s", project_id, e)
 
-    response = DecisionEvaluateResponse(
+    return DecisionEvaluateResponse(
         decision_id=decision_id,
         decision_title=title,
         scores=scores,
@@ -332,16 +337,14 @@ async def evaluate_decision(project_id: str, body: DecisionEvaluateRequest):
         tradeoffs=tradeoffs,
         persona_scores=response_persona_scores,
         attached_labels=attached_labels,
-        decision_summary=synthesis_result.get("decision_summary") if synthesis_result else None,
-        core_tensions=core_tensions if core_tensions else (synthesis_result.get("core_tensions") if synthesis_result else None),
-        paths=synthesis_result.get("paths") if synthesis_result else None,
-        path_ranking=synthesis_result.get("path_ranking") if synthesis_result else None,
-        recommended_path=synthesis_result.get("recommended_path") if synthesis_result else None,
-        recommended_path_next_steps=synthesis_result.get("recommended_path_next_steps") if synthesis_result else None,
-        decision_tree=synthesis_result.get("decision_tree") if synthesis_result else None,
+        decision_summary=None,
+        core_tensions=core_tensions or None,
+        paths=None,
+        path_ranking=None,
+        recommended_path=None,
+        recommended_path_next_steps=None,
+        decision_tree=None,
     )
-
-    return response
 
 
 @router.get("/decisions/{decision_id}", response_model=DecisionEvaluateResponse)

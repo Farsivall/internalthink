@@ -361,7 +361,7 @@ Objections: [1-4 short bullet points of risks or concerns, or "None" if you have
         client = OpenAI(api_key=key)
         r = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=2000 if dimensions else 600,
+            max_tokens=1200 if dimensions else 500,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

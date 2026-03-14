@@ -271,15 +271,23 @@ export function DecisionBreakdownModal({
                   Core issues / key tensions
                 </p>
                 <ul className="space-y-2">
-                  {decision.core_tensions.slice(0, 4).map((t, i) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-2 text-sm text-white/90 leading-relaxed"
-                    >
-                      <span className="text-amber-400 mt-0.5 shrink-0">•</span>
-                      <span>{t}</span>
-                    </li>
-                  ))}
+                  {decision.core_tensions.slice(0, 5).map((t, i) => {
+                    const title = typeof t === 'string' ? t : (t as { title?: string; explanation?: string })?.title ?? ''
+                    const explanation = typeof t === 'string' ? '' : (t as { title?: string; explanation?: string })?.explanation ?? ''
+                    return (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2 text-sm text-white/90 leading-relaxed"
+                      >
+                        <span className="text-amber-400 mt-0.5 shrink-0">•</span>
+                        <span>
+                          {title && <span className="font-semibold text-white">{title}</span>}
+                          {title && explanation && <span className="text-white/50"> — </span>}
+                          {explanation && <span className="text-white/70">{explanation}</span>}
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
               </section>
             )}
